@@ -1,0 +1,25 @@
+{
+  "name": "ai-digital-office",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "AI Digital Office — a working prototype of the Telegram + AI Manager + approval-gate office described in the AI Digital Office setup guide.",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js",
+    "check": "node scripts/check.mjs",
+    "backup": "node scripts/backup.mjs"
+  },
+  "keywords": [
+    "ai",
+    "n8n",
+    "ollama",
+    "telegram",
+    "automation",
+    "digital-office"
+  ],
+  "license": "MIT"
+}

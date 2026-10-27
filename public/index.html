@@ -1,0 +1,419 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#0b1220" />
+    <meta
+      name="description"
+      content="AI Digital Office — a working prototype of the Telegram + AI Manager + approval-gate office from the setup guide."
+    />
+    <title>AI Digital Office</title>
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="app" id="app">
+      <!-- ── Sidebar ─────────────────────────────────────────── -->
+      <aside class="rail" aria-label="Primary">
+        <div class="brand">
+          <div class="brand-mark" aria-hidden="true">
+            <svg viewBox="0 0 32 32" fill="none">
+              <rect x="3" y="6" width="26" height="20" rx="5" stroke="currentColor" stroke-width="1.8" />
+              <path d="M9 20V15M14 20V11M19 20V14M24 20V12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
+            </svg>
+          </div>
+          <div class="brand-text">
+            <strong>AI Digital Office</strong>
+            <span id="brand-sub">Prototype v1.0</span>
+          </div>
+        </div>
+
+        <nav class="nav" id="nav">
+          <button class="nav-item is-active" data-view="console">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v11H9l-5 4V5Z" /></svg>
+            <span>Console</span>
+            <em class="dot" id="nav-dot-console" hidden></em>
+          </button>
+          <button class="nav-item" data-view="tasks">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h10" /></svg>
+            <span>Tasks</span>
+            <em class="count" id="nav-count-tasks">0</em>
+          </button>
+          <button class="nav-item" data-view="drafts">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h9l5 5v13H6V3Z" /><path d="M15 3v5h5" /></svg>
+            <span>Drafts</span>
+            <em class="count count-warn" id="nav-count-drafts">0</em>
+          </button>
+          <button class="nav-item" data-view="leads">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6" /><path d="m16 16 4 4" /></svg>
+            <span>Leads</span>
+            <em class="count" id="nav-count-leads">0</em>
+          </button>
+          <button class="nav-item" data-view="log">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 19V5M4 19h16" /><path d="m7 15 4-4 3 3 4-6" /></svg>
+            <span>Daily Log</span>
+          </button>
+          <button class="nav-item" data-view="audit">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 4 7v6c0 4 3.5 7 8 8 4.5-1 8-4 8-8V7l-8-4Z" /><path d="m9 12 2 2 4-4" /></svg>
+            <span>Audit</span>
+          </button>
+          <button class="nav-item" data-view="setup">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3.2" /><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1" /></svg>
+            <span>Setup</span>
+          </button>
+          <button class="nav-item" data-view="docs">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H20v15H6.5A2.5 2.5 0 0 0 4 20.5v-15Z" /><path d="M4 20.5A2.5 2.5 0 0 1 6.5 18H20v3H6.5A2.5 2.5 0 0 1 4 20.5Z" /></svg>
+            <span>Guide</span>
+          </button>
+        </nav>
+
+        <div class="rail-foot">
+          <div class="provider-pill" id="provider-pill" title="Active AI engine">
+            <span class="pulse"></span>
+            <span id="provider-label">checking engine…</span>
+          </div>
+          <p class="rail-note">Human approval required before anything public, outbound, or irreversible.</p>
+        </div>
+      </aside>
+
+      <!-- ── Main ────────────────────────────────────────────── -->
+      <main class="main">
+        <header class="topbar">
+          <div class="topbar-title">
+            <h1 id="view-title">Console</h1>
+            <p id="view-sub">Send a command — the office plans, drafts and waits for your approval.</p>
+          </div>
+          <div class="topbar-actions">
+            <button class="btn btn-ghost" id="btn-report" type="button">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 4h9l4 4v12H6V4Z" /><path d="M9 12h6M9 16h4" /></svg>
+              <span>Daily report</span>
+            </button>
+            <button class="btn btn-primary" id="btn-task" type="button">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
+              <span>New task</span>
+            </button>
+          </div>
+        </header>
+
+        <div class="scroll" id="scroll">
+          <!-- Console -->
+          <section class="view is-active" data-view="console">
+            <div class="console-grid">
+              <div class="chat card">
+                <div class="chat-head">
+                  <div class="chat-head-left">
+                    <span class="avatar">AI</span>
+                    <div>
+                      <strong>AI Manager</strong>
+                      <small id="chat-status">Online · approval gates on</small>
+                    </div>
+                  </div>
+                  <button class="icon-btn" id="btn-clear" title="Clear chat view" type="button">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13" /></svg>
+                  </button>
+                </div>
+                <div class="chat-stream" id="chat-stream" aria-live="polite"></div>
+                <div class="composer">
+                  <div class="chips" id="chips"></div>
+                  <form class="composer-row" id="composer-form" autocomplete="off">
+                    <textarea
+                      id="composer-input"
+                      rows="1"
+                      placeholder="Type /task, /draft, /report … (Enter to send, Shift+Enter for a new line)"
+                      aria-label="Command input"
+                    ></textarea>
+                    <button class="send" type="submit" id="send-btn" aria-label="Send command">
+                      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m4 12 16-8-6 16-2.5-6.5L4 12Z" /></svg>
+                    </button>
+                  </form>
+                  <p class="composer-hint">
+                    Nothing is published or messaged automatically. Every draft waits for <code>/approve</code>.
+                  </p>
+                </div>
+              </div>
+
+              <aside class="rail-cards">
+                <div class="card stat-card">
+                  <span class="stat-label">Awaiting approval</span>
+                  <strong class="stat-value" id="stat-awaiting">0</strong>
+                  <span class="stat-foot" id="stat-awaiting-foot">All clear</span>
+                </div>
+                <div class="card mini-card">
+                  <div class="mini-row"><span>Open tasks</span><b id="stat-open">0</b></div>
+                  <div class="mini-row"><span>Blocked</span><b id="stat-blocked">0</b></div>
+                  <div class="mini-row"><span>Leads to verify</span><b id="stat-leads">0</b></div>
+                  <div class="mini-row"><span>Model calls today</span><b id="stat-calls">0/200</b></div>
+                </div>
+                <div class="card engine-card">
+                  <div class="engine-head">
+                    <span>Engine</span>
+                    <span class="tag" id="engine-tag">offline</span>
+                  </div>
+                  <p id="engine-note">No model configured — the deterministic rules engine is handling every agent.</p>
+                  <button class="btn btn-small btn-ghost" type="button" data-goto="setup">Configure</button>
+                </div>
+                <div class="card team-card">
+                  <span class="card-eyebrow">Your AI team</span>
+                  <ul id="team-list"></ul>
+                </div>
+              </aside>
+            </div>
+          </section>
+
+          <!-- Tasks -->
+          <section class="view" data-view="tasks">
+            <div class="toolbar">
+              <div class="segmented" id="task-filters">
+                <button class="is-active" data-filter="all" type="button">All</button>
+                <button data-filter="Pending" type="button">Pending</button>
+                <button data-filter="In Progress" type="button">In progress</button>
+                <button data-filter="Blocked" type="button">Blocked</button>
+                <button data-filter="Done" type="button">Done</button>
+              </div>
+              <div class="toolbar-right">
+                <a class="btn btn-ghost btn-small" href="/api/export/tasks" download>Export CSV</a>
+                <button class="btn btn-primary btn-small" id="btn-task-2" type="button">New task</button>
+              </div>
+            </div>
+            <div class="card table-card">
+              <table class="table" id="tasks-table">
+                <thead>
+                  <tr>
+                    <th>ID</th>
+                    <th>Task</th>
+                    <th>Priority</th>
+                    <th>Owner</th>
+                    <th>Deadline</th>
+                    <th>Status</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody></tbody>
+              </table>
+              <div class="empty" id="tasks-empty" hidden>
+                <p>No tasks yet. Send <code>/task</code> in the console to plan your first piece of work.</p>
+              </div>
+            </div>
+          </section>
+
+          <!-- Drafts -->
+          <section class="view" data-view="drafts">
+            <div class="toolbar">
+              <div class="segmented" id="draft-filters">
+                <button class="is-active" data-filter="all" type="button">All</button>
+                <button data-filter="Awaiting approval" type="button">Awaiting</button>
+                <button data-filter="Approved" type="button">Approved</button>
+                <button data-filter="Revision requested" type="button">Revision</button>
+                <button data-filter="Rejected" type="button">Rejected</button>
+              </div>
+              <div class="toolbar-right">
+                <a class="btn btn-ghost btn-small" href="/api/export/drafts" download>Export CSV</a>
+                <button class="btn btn-primary btn-small" id="btn-draft" type="button">New draft</button>
+              </div>
+            </div>
+            <div id="drafts-list" class="draft-list"></div>
+          </section>
+
+          <!-- Leads -->
+          <section class="view" data-view="leads">
+            <div class="card callout">
+              <strong>Ethical research only.</strong>
+              <p>
+                Public sources, source URL mandatory, every lead marked <em>Needs human verification</em>, and no
+                auto-messaging. Dedupe by domain before you add someone new.
+              </p>
+            </div>
+            <div class="toolbar">
+              <span class="muted" id="leads-summary">0 leads</span>
+              <div class="toolbar-right">
+                <a class="btn btn-ghost btn-small" href="/api/export/leads" download>Export CSV</a>
+                <button class="btn btn-primary btn-small" id="btn-lead" type="button">Add leads</button>
+              </div>
+            </div>
+            <div class="card table-card">
+              <table class="table" id="leads-table">
+                <thead>
+                  <tr>
+                    <th>ID</th>
+                    <th>Business</th>
+                    <th>Niche</th>
+                    <th>Source</th>
+                    <th>Contact</th>
+                    <th>Review</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody></tbody>
+              </table>
+              <div class="empty" id="leads-empty" hidden>
+                <p>No leads yet. Use <code>/lead</code> with a public source URL and your own notes.</p>
+              </div>
+            </div>
+          </section>
+
+          <!-- Daily Log -->
+          <section class="view" data-view="log">
+            <div class="toolbar">
+              <span class="muted">One row per day, written by the Daily Reporting Agent.</span>
+              <div class="toolbar-right">
+                <a class="btn btn-ghost btn-small" href="/api/export/daily-log" download>Export CSV</a>
+                <button class="btn btn-primary btn-small" id="btn-report-2" type="button">Generate today's report</button>
+              </div>
+            </div>
+            <div id="log-list" class="log-list"></div>
+          </section>
+
+          <!-- Audit -->
+          <section class="view" data-view="audit">
+            <div class="toolbar">
+              <span class="muted">Command, timestamp, reference, decision — the logging rule from Chapter 9.</span>
+            </div>
+            <div class="card"><ol class="timeline" id="audit-list"></ol></div>
+          </section>
+
+          <!-- Setup -->
+          <section class="view" data-view="setup">
+            <div class="setup-grid">
+              <div class="card">
+                <h2>AI engine</h2>
+                <p class="muted">
+                  Prefer Ollama on your own machine (free, private). Gemini is optional for machines that cannot run a
+                  local model. The offline rules engine always works as a fallback.
+                </p>
+                <form id="settings-form" class="form">
+                  <label>
+                    Provider
+                    <select name="provider" id="set-provider">
+                      <option value="auto">auto (Ollama → Gemini → offline)</option>
+                      <option value="ollama">ollama only</option>
+                      <option value="gemini">gemini only</option>
+                      <option value="offline">offline rules only</option>
+                    </select>
+                  </label>
+                  <div class="form-row">
+                    <label>
+                      Ollama base URL
+                      <input name="ollamaUrl" id="set-ollama-url" placeholder="http://localhost:11434" />
+                    </label>
+                    <label>
+                      Ollama model
+                      <input name="ollamaModel" id="set-ollama-model" placeholder="llama3.2" />
+                    </label>
+                  </div>
+                  <div class="form-row">
+                    <label>
+                      Gemini model
+                      <input name="geminiModel" id="set-gemini-model" placeholder="gemini-2.0-flash" />
+                    </label>
+                    <label>
+                      Max model calls / day
+                      <input name="maxCallsPerDay" id="set-max-calls" type="number" min="1" max="5000" />
+                    </label>
+                  </div>
+                  <div class="form-actions">
+                    <button class="btn btn-primary" type="submit">Save settings</button>
+                    <button class="btn btn-ghost" type="button" id="btn-test-provider">Test connection</button>
+                    <span class="muted small" id="provider-test-result"></span>
+                  </div>
+                </form>
+                <p class="hint">
+                  Running n8n in Docker with Ollama on the host? Use <code>http://host.docker.internal:11434</code>.
+                </p>
+              </div>
+
+              <div class="card">
+                <h2>Secrets &amp; channels</h2>
+                <p class="muted">Values are read from <code>.env</code> on the server. They are never shown here.</p>
+                <ul class="check-list" id="secret-list"></ul>
+                <div class="divider"></div>
+                <h3>Telegram</h3>
+                <p class="muted small">
+                  Create a bot with @BotFather, put the token in <code>.env</code>, then set
+                  <code>TELEGRAM_MODE=polling</code>. Only IDs in <code>ALLOWED_TELEGRAM_USER_IDS</code> can trigger
+                  workflows.
+                </p>
+                <ul class="check-list" id="telegram-list"></ul>
+              </div>
+
+              <div class="card">
+                <h2>Google Sheets</h2>
+                <p class="muted">
+                  Create a spreadsheet named <strong>AI Digital Office</strong> with tabs Tasks, Drafts, Leads and
+                  Daily Log. Export the current data and import it, or connect the n8n Google Sheets node.
+                </p>
+                <div class="export-grid">
+                  <a class="export-link" href="/api/export/tasks" download><b>Tasks</b><span>csv</span></a>
+                  <a class="export-link" href="/api/export/drafts" download><b>Drafts</b><span>csv</span></a>
+                  <a class="export-link" href="/api/export/leads" download><b>Leads</b><span>csv</span></a>
+                  <a class="export-link" href="/api/export/daily-log" download><b>Daily Log</b><span>csv</span></a>
+                </div>
+                <p class="hint">Column order matches Chapter 14 of the guide exactly.</p>
+              </div>
+
+              <div class="card">
+                <h2>Deployment checklist</h2>
+                <p class="muted">From the guide's final page. Tick these before you call the office “live”.</p>
+                <ul class="check-list checklist" id="deploy-list">
+                  <li>Engine reachable (Ollama running or Gemini key set)</li>
+                  <li>Telegram bot token stored only in credentials</li>
+                  <li>Only your Telegram user ID can trigger workflows</li>
+                  <li>AI output validated before writing to Sheets</li>
+                  <li>Every draft requires Approve, Revise, or Reject</li>
+                  <li>No workflow publishes, messages, spends, or deletes without approval</li>
+                  <li>Workflow export saved to GitHub</li>
+                  <li>Data volume and Sheets backed up</li>
+                  <li>Error alerts and cost limits configured</li>
+                </ul>
+              </div>
+
+              <div class="card danger-card">
+                <h2>Data</h2>
+                <p class="muted">
+                  Everything lives in <code>data/db.json</code> on your machine. Back it up before resetting — the reset
+                  cannot be undone.
+                </p>
+                <div class="form-actions">
+                  <button class="btn btn-ghost" type="button" id="btn-download-backup">Download backup</button>
+                  <button class="btn btn-danger" type="button" id="btn-reset">Reset office</button>
+                </div>
+                <p class="hint">Reset keeps the app running and optionally restores the Chapter 4 demo rows.</p>
+              </div>
+            </div>
+          </section>
+
+          <!-- Docs -->
+          <section class="view" data-view="docs">
+            <div class="docs-grid">
+              <nav class="doc-list card" id="doc-list" aria-label="Guide chapters"></nav>
+              <article class="card doc-body" id="doc-body">
+                <p class="muted">Select a chapter from the guide.</p>
+              </article>
+            </div>
+          </section>
+        </div>
+      </main>
+    </div>
+
+    <!-- ── Modals ─────────────────────────────────────────────── -->
+    <div class="modal-backdrop" id="modal" hidden>
+      <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+        <header class="modal-head">
+          <h2 id="modal-title">Action</h2>
+          <button class="icon-btn" id="modal-close" type="button" aria-label="Close">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18" /></svg>
+          </button>
+        </header>
+        <div class="modal-body" id="modal-body"></div>
+        <footer class="modal-foot">
+          <button class="btn btn-ghost" id="modal-cancel" type="button">Cancel</button>
+          <button class="btn btn-primary" id="modal-confirm" type="button">Send</button>
+        </footer>
+      </div>
+    </div>
+
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>

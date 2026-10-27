@@ -1,0 +1,80 @@
+# AI Digital Office — local stack (Chapter 3 of the guide)
+#
+#   docker compose up -d n8n        # n8n only
+#   docker compose up -d            # n8n + this office in a container
+#
+# Ollama is expected on the HOST (simplest, and it can use your GPU):
+#   https://ollama.com/download  →  ollama pull llama3.2
+#
+# Linux: host.docker.internal is mapped with extra_hosts below.
+
+services:
+  n8n:
+    image: docker.n8n.io/n8nio/n8n
+    container_name: ai-office-n8n
+    restart: unless-stopped
+    ports:
+      - "0.0.0.0:5678:5678"
+    environment:
+      - N8N_HOST=0.0.0.0
+      - N8N_PORT=5678
+      - N8N_PROTOCOL=http
+      # Change this to your preview host / real domain in production.
+      - WEBHOOK_URL=${N8N_WEBHOOK_URL:-http://localhost:5678/}
+      # Generate with: openssl rand -hex 32
+      - N8N_ENCRYPTION_KEY=${N8N_ENCRYPTION_KEY:-change-me-please-use-a-random-value}
+      - N8N_SECURE_COOKIE=false
+      - GENERIC_TIMEZONE=${OFFICE_TIMEZONE:-Asia/Kolkata}
+      - TZ=${OFFICE_TIMEZONE:-Asia/Kolkata}
+      - N8N_DIAGNOSTICS_ENABLED=false
+      - N8N_RUNNERS_ENABLED=true
+    volumes:
+      - n8n_data:/home/node/.n8n
+      - ./n8n/workflows:/workflows:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:5678/healthz || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 40s
+
+  office:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ai-office-app
+    restart: unless-stopped
+    ports:
+      - "0.0.0.0:3000:3000"
+    environment:
+      - PORT=3000
+      - HOST=0.0.0.0
+      - DATA_DIR=/data
+      - SEED_DEMO=${SEED_DEMO:-true}
+      - OFFICE_TIMEZONE=${OFFICE_TIMEZONE:-Asia/Kolkata}
+      - AI_PROVIDER=${AI_PROVIDER:-auto}
+      # Inside Docker, reach Ollama on the host through this name:
+      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-llama3.2}
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - GEMINI_MODEL=${GEMINI_MODEL:-gemini-2.0-flash}
+      - MAX_MODEL_CALLS_PER_DAY=${MAX_MODEL_CALLS_PER_DAY:-200}
+      - ALLOWED_USER_IDS=${ALLOWED_USER_IDS:-owner}
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
+      - ALLOWED_TELEGRAM_USER_IDS=${ALLOWED_TELEGRAM_USER_IDS:-owner}
+      - TELEGRAM_MODE=${TELEGRAM_MODE:-off}
+      - WEBHOOK_SECRET=${WEBHOOK_SECRET:-}
+      - OFFICE_ACCESS_CODE=${OFFICE_ACCESS_CODE:-}
+    volumes:
+      - ./data:/data
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      n8n:
+        condition: service_started
+
+volumes:
+  n8n_data:
+    name: ai-office-n8n-data

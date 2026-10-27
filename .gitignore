@@ -1,0 +1,15 @@
+# Runtime data (tasks, drafts, leads, audit). Back these up, do not publish them.
+data/
+backups/
+.check-data/
+
+# Secrets — never commit
+.env
+.env.*
+!.env.example
+
+# Tooling
+node_modules/
+npm-debug.log*
+.DS_Store
+*.zip
