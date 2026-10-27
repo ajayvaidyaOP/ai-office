@@ -1,12 +1,12 @@
-# Start here — your AI Digital Office
+# Start here — your AI Invincible Office
 
-This repository is a **working, runnable version** of the *Build Your Own AI Digital Office* guide.
+This repository is a **working, runnable version** of the *Build Your Own AI Invincible Office* guide.
 It implements the guide's first prototype end to end, plus the pieces you need to grow it:
 
 | Guide chapter | What this repo gives you |
 | --- | --- |
 | Ch 1 — Understanding an AI digital office | A live office console with a command → plan → draft → approve loop |
-| Ch 2 — Plan your office | Six agent roles wired in, each with a human control |
+| Ch 2 — Plan your office | Eight agent roles wired in, each with a human control |
 | Ch 3 — Tools and installation | `docker-compose.yml` for n8n, Ollama instructions, Telegram setup |
 | Ch 4 — First AI Manager | `src/agents/` with the exact system prompt and JSON validation |
 | Ch 5 — Specialist agents | Content, Lead Research, Follow-up, Quality Checker, Daily Reporting |
@@ -19,6 +19,7 @@ It implements the guide's first prototype end to end, plus the pieces you need t
 | Ch 12 — Budget and hosting | `10-budget-and-hosting.md` with the INR table |
 | Ch 13 — Roadmap | `11-roadmap.md` six levels |
 | Ch 14 — Copy-paste resources | Prompts in `05-prompts.md`, sheet templates in `templates/` |
+| **Beyond the guide** | Dashboard, Client Finder, Clients CRM, proposals, calendar, reports → `14-invincible-modules.md` |
 
 ## The one rule
 
@@ -71,8 +72,10 @@ Then follow `02-install.md` and `06-n8n-workflows.md`.
 4. Send `/draft Write a friendly Instagram caption for that Reel`.
 5. Read the draft, its Quality Checker notes, then click **Approve**.
 6. Send `/report` and check the **Daily Log** tab.
-7. Open **Setup → Google Sheets** and download the four CSVs. Import them into a sheet
-   named *AI Digital Office* with tabs Tasks, Drafts, Leads, Daily Log.
+7. Open **Setup → Google Sheets export** and download the CSVs. Import them into a sheet
+   named *AI Invincible Office* with tabs Tasks, Drafts, Leads, Daily Log, Clients.
+8. Click **Generate morning brief** — that is your daily starting point.
+9. Open **Client Finder**, run one niche in your city, and add five leads with real sources.
 
 ## What runs where
 

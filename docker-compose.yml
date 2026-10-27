@@ -1,4 +1,4 @@
-# AI Digital Office — local stack (Chapter 3 of the guide)
+# AI Invincible Office — local stack (Chapter 3 of the guide)
 #
 #   docker compose up -d n8n        # n8n only
 #   docker compose up -d            # n8n + this office in a container

@@ -7,7 +7,7 @@ import { store } from './store.js';
  *
  * The guide uses Google Sheets as the task database (Chapters 4, 8, 14).
  * This module produces the exact tab layouts from Chapter 14 as CSV, so you can
- * import them into a sheet named "AI Digital Office" with tabs
+ * import them into a sheet named "AI Invincible Office" with tabs
  * Tasks / Drafts / Leads / Daily Log — or paste a single row straight in.
  *
  * No OAuth is required for export. Direct write-back is opt-in and documented
@@ -29,6 +29,7 @@ export const TABS = {
     'Next Action',
   ],
   'Daily Log': ['Date', 'Completed', 'Pending', 'Blocked', 'Drafts Awaiting Approval', 'Notes'],
+  Clients: ['Client ID', 'Company', 'Contact', 'Email', 'Phone', 'Niche', 'Stage', 'Value', 'Next Follow Up', 'Notes'],
 };
 
 const cell = (value) => {
@@ -76,6 +77,19 @@ export function tabRows(tab, db = store.db) {
         'Contact Status': lead.contactStatus,
         'Review Status': lead.reviewStatus,
         'Next Action': lead.nextAction,
+      }));
+    case 'Clients':
+      return db.clients.map((client) => ({
+        'Client ID': client.id,
+        Company: client.company,
+        Contact: client.contact,
+        Email: client.email,
+        Phone: client.phone,
+        Niche: client.niche,
+        Stage: client.stage,
+        Value: client.value,
+        'Next Follow Up': client.nextFollowUp || '',
+        Notes: client.notes,
       }));
     case 'Daily Log':
       return db.dailyLog.map((row) => ({

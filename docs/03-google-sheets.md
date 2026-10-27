@@ -1,11 +1,11 @@
 # Google Sheets — the task database
 
-The guide stores everything in a spreadsheet named **AI Digital Office** with four tabs.
+The guide stores everything in a spreadsheet named **AI Invincible Office** with four tabs.
 This repo uses the same layout so you can move data between them either way.
 
 ## Create the spreadsheet
 
-1. Create a new Google Sheet named `AI Digital Office`.
+1. Create a new Google Sheet named `AI Invincible Office`.
 2. Add four tabs with these exact names: `Tasks`, `Drafts`, `Leads`, `Daily Log`.
 3. Paste the header rows from `templates/*.csv`, or use **File → Import → Upload** and pick
    each CSV with *Insert new sheet(s)*.

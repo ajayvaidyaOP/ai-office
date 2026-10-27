@@ -3,8 +3,9 @@
  * Deployment self-check — Chapter 22 of the guide, automated.
  *
  * Starts a throwaway instance of the office on a random port with an empty
- * database, then walks the full prototype flow:
- *   health → /task → /draft → approval gate → /approve → /report → /lead → export
+ * database, then walks the full Invincible flow:
+ *   health → /task → /draft → approval gate → /approve → /report
+ *   → /brief → /find → /lead → /verify → /promote → /proposal → clients → export
  *
  * Run: npm run check
  * Exit code 0 means every gate behaved as designed.
@@ -135,8 +136,62 @@ async function main() {
     const verify = await command(`/verify ${leadId}`);
     /Verified by human/.test(verify.reply) ? pass('Human verification is recorded') : fail('Verify command failed');
     const outreach = await command(`/outreach ${leadId}`);
-    /NOT sent|not sent/i.test(outreach.reply) ? pass('Outreach draft is never auto-sent') : fail('Outreach did not confirm manual sending');
+    /APPROVAL NEEDED/.test(outreach.reply) && /Outreach/i.test(outreach.reply)
+      ? pass('Outreach becomes a gated draft (never auto-sent)')
+      : fail('Outreach was not gated', outreach.reply.slice(0, 140));
   }
+
+  /* ── Invincible modules ─────────────────────────────────── */
+  const brief = await command('/brief');
+  /INVINCIBLE BRIEF/i.test(brief.reply) && brief.reply.includes('Focus:')
+    ? pass('Morning brief is generated from stored data')
+    : fail('Morning brief missing', brief.reply.slice(0, 120));
+
+  const find = await command('/find cafés in Pune');
+  /CLIENT FINDER PLAN/i.test(find.reply) && (find.reply.match(/^\s+\d+\./gm) || []).length >= 4
+    ? pass('Client Finder returns a research plan')
+    : fail('Client Finder plan looks wrong', find.reply.slice(0, 140));
+
+  const promote = await command(`/promote ${leadId}`);
+  const clientId = (promote.reply.match(/C-\d{4}/) || [])[0];
+  clientId ? pass('Lead promotes into a client record', clientId) : fail('Promotion failed', promote.reply.slice(0, 140));
+
+  if (clientId) {
+    const stage = await command(`/stage ${clientId} Negotiation`);
+    /Negotiation/.test(stage.reply) ? pass('Client stage moves through the pipeline') : fail('Stage change failed');
+
+    const proposal = await command(`/proposal ${clientId}`);
+    const proposalId = (proposal.reply.match(/D-\d{4}/) || [])[0];
+    proposalId && /APPROVAL NEEDED/.test(proposal.reply) && /Proposal/i.test(proposal.reply)
+      ? pass('Proposal is created as a gated draft', proposalId)
+      : fail('Proposal was not gated', proposal.reply.slice(0, 160));
+  }
+
+  const clientRow = await fetch(`${base}/api/clients`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ company: 'Check Co', contact: 'Asha', niche: 'retail', stage: 'Won', value: 60000 }),
+  }).then((res) => res.json());
+  clientRow.ok && clientRow.client?.stage === 'Won'
+    ? pass('Clients API creates a won deal (pipeline maths)')
+    : fail('Client API failed', JSON.stringify(clientRow).slice(0, 120));
+
+  const stateInvincible = await (await fetch(`${base}/api/state`)).json();
+  stateInvincible.brand?.name === 'AI Invincible Office'
+    ? pass('Brand is AI Invincible Office')
+    : fail('Brand name is wrong', stateInvincible.brand?.name || 'missing');
+
+  const dash = stateInvincible.dashboard;
+  dash?.overview?.pipeline?.wonValue > 0 && Array.isArray(dash?.mission)
+    ? pass('Dashboard metrics compute pipeline + mission', `won ₹${dash.overview.pipeline.wonValue}`)
+    : fail('Dashboard metrics missing');
+
+  dash?.agents?.length ? pass('Agent health is tracked', `${dash.agents.length} agents`) : fail('No agent runs recorded');
+
+  const clientsCsv = await fetch(`${base}/api/export/clients`).then((res) => res.text());
+  clientsCsv.startsWith('Client ID,')
+    ? pass('Clients CSV export matches the sheet headers')
+    : fail('Clients CSV header wrong');
 
   const csv = await fetch(`${base}/api/export/tasks`);
   const csvText = await csv.text();
@@ -152,7 +207,7 @@ async function main() {
 
   const index = await fetch(`${base}/`);
   const html = await index.text();
-  html.includes('AI Digital Office') && index.ok ? pass('Console page is served') : fail('Console page missing');
+  html.includes('AI Invincible Office') && index.ok ? pass('Console page is served') : fail('Console page missing');
 }
 
 main()
@@ -162,7 +217,7 @@ main()
     setTimeout(() => server.kill('SIGKILL'), 800);
 
     const width = Math.max(...results.map((row) => row.label.length)) + 2;
-    console.log('\n  AI Digital Office — deployment self-check\n');
+    console.log('\n  AI Invincible Office — deployment self-check\n');
     for (const row of results) {
       console.log(`  ${row.ok ? '✅' : '❌'}  ${row.label.padEnd(width)}${row.extra ? `  ${row.extra}` : ''}`);
     }

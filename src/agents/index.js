@@ -1,17 +1,26 @@
 import { PROMPTS, fillPrompt } from './prompts.js';
 import { ask, extractJson, probeOllama } from './provider.js';
+import { store } from '../store.js';
 import {
   detectPlatform,
   detectTone,
+  offlineBrief,
   offlineContent,
+  offlineFindPlan,
   offlineFollowup,
   offlineManager,
   offlineOutreach,
+  offlineProposal,
   offlineQuality,
   offlineReport,
   offlineResearch,
+  scoreLead,
   summariseRequestSafely,
 } from './offline.js';
+
+/** Record every agent invocation for the Agents + Reports pages. */
+const track = (agent, startedAt, provider, ok = true, ref = '', detail = '') =>
+  store.recordRun({ agent, ok, provider, ms: Date.now() - startedAt, ref, detail });
 
 const PRIORITIES = ['High', 'Medium', 'Low'];
 const OWNERS = ['You', 'Content Agent', 'Research Agent'];
@@ -63,6 +72,7 @@ export function validateTasks(payload) {
  * Tries the model, validates the JSON, and falls back to the offline planner.
  */
 export async function runManager(request, context = {}) {
+  const startedAt = Date.now();
   const platform = detectPlatform(request);
   try {
     const result = await ask({
@@ -79,6 +89,7 @@ export async function runManager(request, context = {}) {
         needsReview: true,
       };
     }
+    track('manager', startedAt, result.provider, true, '', `${validation.tasks.length} tasks`);
     return {
       tasks: validation.tasks,
       provider: `${result.provider}/${result.model}`,
@@ -86,6 +97,7 @@ export async function runManager(request, context = {}) {
       needsReview: validation.issues.length > 0,
     };
   } catch (error) {
+    track('manager', startedAt, 'offline', false, '', error.message);
     return {
       ...offlineManager(request, { platform }),
       provider: 'offline',
@@ -97,6 +109,7 @@ export async function runManager(request, context = {}) {
 
 /** Content Creation Agent — Chapter 5. */
 export async function runContent({ request, platform, audience, tone, research }) {
+  const startedAt = Date.now();
   const resolvedPlatform = platform || detectPlatform(request);
   const resolvedTone = tone || detectTone(request);
   try {
@@ -111,6 +124,7 @@ export async function runContent({ request, platform, audience, tone, research }
       ].join('\n'),
       system: PROMPTS.content,
     });
+    track('content', startedAt, result.provider, true, '', resolvedPlatform);
     return {
       draft: result.text.trim(),
       platform: resolvedPlatform,
@@ -119,6 +133,7 @@ export async function runContent({ request, platform, audience, tone, research }
       provider: `${result.provider}/${result.model}`,
     };
   } catch (error) {
+    track('content', startedAt, 'offline', false, '', error.message);
     return {
       draft: offlineContent({ request, platform: resolvedPlatform, audience, tone: resolvedTone, research }),
       platform: resolvedPlatform,
@@ -132,6 +147,7 @@ export async function runContent({ request, platform, audience, tone, research }
 
 /** Quality Checker — Chapter 5 (JSON contract). */
 export async function runQuality({ draft, platform, audience }) {
+  const startedAt = Date.now();
   try {
     const result = await ask({
       prompt: [
@@ -145,6 +161,7 @@ export async function runQuality({ draft, platform, audience }) {
     });
     const payload = result.text;
     const decision = ['approve', 'revise', 'reject'].includes(payload.decision) ? payload.decision : 'revise';
+    track('quality', startedAt, result.provider, true, '', decision);
     return {
       decision,
       issues: Array.isArray(payload.issues) ? payload.issues.map(String).slice(0, 10) : [],
@@ -153,6 +170,7 @@ export async function runQuality({ draft, platform, audience }) {
       provider: `${result.provider}/${result.model}`,
     };
   } catch (error) {
+    track('quality', startedAt, 'offline', false, '', error.message);
     return {
       ...offlineQuality(draft, { platform }),
       checkedAt: new Date().toISOString(),
@@ -163,6 +181,7 @@ export async function runQuality({ draft, platform, audience }) {
 
 /** Lead Research Agent — Chapter 5. Model never invents contacts; every row needs verification. */
 export async function runResearch({ niche, location, sourceUrl, notes = '' }) {
+  const startedAt = Date.now();
   if (!sourceUrl) {
     return {
       ok: false,
@@ -184,9 +203,11 @@ export async function runResearch({ niche, location, sourceUrl, notes = '' }) {
     });
     const rows = Array.isArray(result.text?.leads) ? result.text.leads : [];
     const leads = sanitiseLeads(rows, sourceUrl);
+    track('leadResearch', startedAt, result.provider, leads.length > 0, '', `${leads.length} rows`);
     return { ok: leads.length > 0, leads, provider: `${result.provider}/${result.model}` };
   } catch (error) {
     const leads = offlineResearch({ niche, location, sourceUrl, notes });
+    track('leadResearch', startedAt, 'offline', false, '', error.message);
     return { ok: leads.length > 0, leads, provider: 'offline', providerError: error.message };
   }
 }
@@ -258,6 +279,81 @@ export async function runReport(data) {
   }
 }
 
+/** Chief of Staff morning brief — Chapter 10, upgraded. */
+export async function runBrief(context) {
+  const startedAt = Date.now();
+  try {
+    const result = await ask({
+      prompt: `Office data (JSON):\n${JSON.stringify(context, null, 2)}`,
+      system: PROMPTS.brief,
+    });
+    track('brief', startedAt, result.provider, true);
+    return { text: result.text.trim(), provider: `${result.provider}/${result.model}` };
+  } catch (error) {
+    track('brief', startedAt, 'offline', false, '', error.message);
+    return { text: offlineBrief(context), provider: 'offline', providerError: error.message };
+  }
+}
+
+/** Client Finder — research plan, never invented businesses. */
+export async function runFindPlan({ niche, location, notes = '' }) {
+  const startedAt = Date.now();
+  const fallback = offlineFindPlan({ niche, location, notes });
+  try {
+    const result = await ask({
+      prompt: [
+        `Niche: ${niche || 'not specified'}`,
+        `Location: ${location || 'not specified'}`,
+        notes ? `What the human already knows:\n${notes}` : 'No extra notes.',
+        'Produce the research plan only. Do not list businesses you cannot verify.',
+      ].join('\n'),
+      system: PROMPTS.finderPlan,
+      expectJson: true,
+    });
+    const plan = normalisePlan(result.text, fallback);
+    track('finder', startedAt, result.provider, true, '', `${plan.queries.length} queries`);
+    return { ...plan, provider: `${result.provider}/${result.model}` };
+  } catch (error) {
+    track('finder', startedAt, 'offline', false, '', error.message);
+    return { ...fallback, provider: 'offline', providerError: error.message };
+  }
+}
+
+function normalisePlan(payload, fallback) {
+  const list = (value, max = 10) =>
+    Array.isArray(value) ? value.map((item) => String(item).trim()).filter(Boolean).slice(0, max) : [];
+  const plan = {
+    summary: String(payload?.summary || fallback.summary).slice(0, 240),
+    queries: list(payload?.queries).length ? list(payload.queries) : fallback.queries,
+    directories: list(payload?.directories, 8).length ? list(payload.directories, 8) : fallback.directories,
+    checklist: list(payload?.checklist, 8).length ? list(payload.checklist, 8) : fallback.checklist,
+    red_flags: list(payload?.red_flags, 8).length ? list(payload.red_flags, 8) : fallback.red_flags,
+  };
+  return plan;
+}
+
+/** Proposal Agent — drafts only, price stays human-controlled. */
+export async function runProposal({ company, contact, niche, value, notes }) {
+  const startedAt = Date.now();
+  try {
+    const result = await ask({
+      prompt: [
+        `Client: ${company || 'not provided'}`,
+        `Contact: ${contact || 'not provided'}`,
+        `Niche: ${niche || 'not provided'}`,
+        `Indicative value: ${Number(value) > 0 ? `INR ${value}` : 'not decided'}`,
+        notes ? `Context notes: ${notes}` : 'No extra notes.',
+      ].join('\n'),
+      system: PROMPTS.proposal,
+    });
+    track('proposal', startedAt, result.provider, true, '', company);
+    return { text: result.text.trim(), provider: `${result.provider}/${result.model}` };
+  } catch (error) {
+    track('proposal', startedAt, 'offline', false, '', error.message);
+    return { text: offlineProposal({ company, contact, niche, value, notes }), provider: 'offline', providerError: error.message };
+  }
+}
+
 export async function testProvider() {
   const probe = await probeOllama({ force: true });
   if (probe.ok) {
@@ -274,4 +370,4 @@ export async function testProvider() {
   return { ok: false, provider: 'none', error: 'No model reachable — running in offline rules mode', models: probe.models };
 }
 
-export { detectPlatform, detectTone, summariseRequestSafely };
+export { detectPlatform, detectTone, summariseRequestSafely, scoreLead };

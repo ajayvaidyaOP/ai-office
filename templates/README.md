@@ -1,6 +1,6 @@
 # Sheet templates
 
-Import these into the Google Sheet named **AI Digital Office** (Chapter 14 of the guide).
+Import these into the Google Sheet named **AI Invincible Office** (Chapter 14 of the guide).
 
 | File | Tab name | Notes |
 | --- | --- | --- |

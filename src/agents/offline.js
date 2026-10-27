@@ -389,6 +389,143 @@ export function offlineResearch({ niche = '', location = '', sourceUrl = '', not
   });
 }
 
+
+/* ── Client pipeline helpers (Chapter 8, extended) ───────────── */
+
+export const LEAD_STAGES = ['New', 'Verified', 'Contacted', 'Replied', 'Won', 'Lost'];
+
+export const nextStage = (stage) => {
+  const index = LEAD_STAGES.indexOf(stage);
+  if (index === -1 || stage === 'Won' || stage === 'Lost') return stage;
+  return LEAD_STAGES[Math.min(index + 1, LEAD_STAGES.length - 3)];
+};
+
+/**
+ * Deterministic 0-100 fit score. Deliberately explainable:
+ * every point comes from something a human can see.
+ */
+export function scoreLead(lead = {}) {
+  let score = 18;
+  const reasons = [];
+  if (/^https?:\/\//i.test(String(lead.sourceUrl || ''))) { score += 18; reasons.push('public source'); }
+  if (/^https?:\/\//i.test(String(lead.website || ''))) { score += 14; reasons.push('website found'); }
+  if (String(lead.fitReason || '').length >= 20) { score += 12; reasons.push('specific fit reason'); }
+  if (String(lead.niche || '').length > 2) { score += 8; reasons.push('niche known'); }
+  if (String(lead.location || '').length > 1) { score += 5; reasons.push('location known'); }
+  if (lead.reviewStatus === 'Verified by human') { score += 20; reasons.push('human verified'); }
+  if (['Contacted', 'Replied', 'Won'].includes(lead.stage)) { score += 6; reasons.push('already in conversation'); }
+  if (String(lead.notes || '').length > 10) { score += 4; reasons.push('context notes'); }
+  if (!lead.sourceUrl) { score -= 10; reasons.push('missing source'); }
+  if (lead.stage === 'Lost') { score = Math.min(score, 25); reasons.push('marked lost'); }
+  return { score: Math.max(4, Math.min(98, Math.round(score))), reasons };
+}
+
+/** Chapter 8 morning brief, offline edition. */
+export function offlineBrief(context = {}) {
+  const { mission = [], approvals = 0, pipeline = {}, followUps = 0, dueToday = 0, overdue = 0, date = '' } = context;
+  const lines = [`☀️ INVINCIBLE BRIEF — ${date || new Date().toISOString().slice(0, 10)}`, ''];
+
+  lines.push('Focus:');
+  if (mission.length === 0) {
+    lines.push('   1. Nothing urgent in the queue — plan one small next step.');
+  } else {
+    mission.slice(0, 3).forEach((item, index) => lines.push(`   ${index + 1}. ${item.title}${item.reason ? ` — ${item.reason}` : ''}`));
+  }
+
+  lines.push('', 'Waiting on you:');
+  lines.push(`   • ${approvals} draft${approvals === 1 ? '' : 's'} awaiting approval`);
+  if (overdue) lines.push(`   • ${overdue} task${overdue === 1 ? '' : 's'} overdue`);
+  if (dueToday) lines.push(`   • ${dueToday} task${dueToday === 1 ? '' : 's'} due today`);
+  if (followUps) lines.push(`   • ${followUps} follow-up${followUps === 1 ? '' : 's'} due`);
+
+  lines.push('', 'Money:');
+  lines.push(`   • Open pipeline ₹${Number(pipeline.openValue || 0).toLocaleString('en-IN')} across ${pipeline.openCount || 0} live deal(s)`);
+  lines.push(`   • Won this cycle ₹${Number(pipeline.wonValue || 0).toLocaleString('en-IN')} · ${pipeline.winRate || 0}% win rate`);
+
+  lines.push('', 'One suggestion:');
+  if (approvals > 0) lines.push('   Clear the approval queue first — drafts do not earn anything sitting still.');
+  else if (followUps > 0) lines.push('   Send one follow-up before lunch; it is the cheapest deal you will close today.');
+  else if (pipeline.openCount) lines.push('   Move one deal to its next stage and write the next step in the notes.');
+  else lines.push('   Run /find for one niche and add five real businesses with sources.');
+
+  lines.push('', 'Based only on stored office data. No progress was invented.');
+  return lines.join('\n');
+}
+
+/** Client Finder research plan, offline edition. */
+export function offlineFindPlan({ niche = '', location = '', notes = '' } = {}) {
+  const n = String(niche || 'your niche').trim();
+  const l = String(location || 'your city').trim();
+  return {
+    summary: `Best-fit clients are small ${n} businesses in ${l} that already post online but have no visible plan.`,
+    queries: [
+      `${n} ${l} contact`,
+      `${n} ${l} instagram`,
+      `best ${n} in ${l} 2026`,
+      `site:linkedin.com/company ${n} ${l}`,
+      `site:justdial.com ${n} ${l}`,
+      `${n} near ${l}`,
+      `${n} ${l} google maps`,
+      notes ? `${n} ${l} ${shorten(notes, 40)}` : `${n} ${l} reviews`,
+    ],
+    directories: [
+      'Google Maps listings with website links',
+      'Justdial / IndiaMART category pages',
+      'LinkedIn company pages filtered by city',
+      'Instagram location tags and recent posts',
+      'Clutch or DesignRush if the niche is creative',
+      'Local business association or chamber directory',
+    ],
+    checklist: [
+      'Open the public source and confirm the business is real by hand',
+      'Check their website and latest public post date',
+      'Write one specific fit reason in your own words',
+      'Copy the exact source URL into the lead row',
+      'Dedupe by domain and normalised business name before adding',
+      'Never invent an email, phone number or revenue figure',
+    ],
+    red_flags: [
+      'No website and no active public presence',
+      'Already has a large in-house content team',
+      'Only gated or paid directories list them',
+      'Source URL does not actually mention the business',
+    ],
+    provider: 'offline',
+  };
+}
+
+/** Proposal draft, offline edition. */
+export function offlineProposal({ company = '', contact = '', niche = '', value = 0, notes = '' } = {}) {
+  const name = company || 'your business';
+  const who = contact && contact !== 'Owner' ? contact : 'there';
+  const price = Number(value) > 0 ? `₹${Number(value).toLocaleString('en-IN')}` : '[PRICE TBC]';
+  return [
+    `# Proposal — ${name}`,
+    '',
+    '## Understanding',
+    `Hi ${who}, from what we discussed, ${name} is doing good work in ${niche || 'your space'} but the content and follow-up work is competing with delivery time. The goal is a repeatable weekly rhythm, not more posting.`,
+    '',
+    '## What we will do',
+    '1. One weekly content plan with hooks and calls to action.',
+    '2. Three drafts per week for your approval — nothing is published without you.',
+    '3. A simple lead and follow-up tracker with one review call each week.',
+    '4. A short monthly report: what shipped, what worked, what changes next.',
+    '',
+    '## Timeline',
+    '[CONFIRM] — propose a two-week setup, then a weekly rhythm.',
+    '',
+    '## Investment',
+    `${price} per month [CONFIRM]`,
+    '',
+    '## Next step',
+    `Does the weekly rhythm above match how ${name} actually works? If yes, I will send the first content plan for review.`,
+    '',
+    '---',
+    notes ? `Notes used: ${shorten(notes, 200)}` : 'No extra notes were provided.',
+    'Draft only. Check every price, date and claim before sending.',
+  ].join('\n');
+}
+
 /** Pull IDs out of any text (used by /approve, /revise, /reject). */
 export function extractIds(text = '', kind = 'task') {
   const regex = kind === 'draft' ? DRAFT_ID : kind === 'lead' ? LEAD_ID : TASK_ID;

@@ -4,6 +4,15 @@ import { fileURLToPath } from 'node:url';
 
 export const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
+/** Product identity — one place to rename the office. */
+export const BRAND = {
+  name: 'AI Invincible Office',
+  short: 'Invincible',
+  workspace: 'Invincible HQ',
+  tagline: 'Plan the week, find the clients, draft the work — you approve everything.',
+  version: '2.0.0',
+};
+
 /** Tiny .env loader — no dependencies, never overrides real environment values. */
 function loadEnvFile() {
   const file = path.join(ROOT, '.env');
@@ -71,7 +80,7 @@ export const config = {
     webhookSecret: process.env.WEBHOOK_SECRET || '',
   },
 
-  version: '1.0.0',
+  version: BRAND.version,
 };
 
 export const hasSecret = (value) => Boolean(value && String(value).trim());

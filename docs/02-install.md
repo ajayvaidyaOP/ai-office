@@ -180,7 +180,7 @@ Set `WEBHOOK_SECRET` in `.env` too — the server rejects updates without the ma
 
 ## 5. Google Sheets
 
-See `03-google-sheets.md`. Short version: create a spreadsheet named **AI Digital Office**
+See `03-google-sheets.md`. Short version: create a spreadsheet named **AI Invincible Office**
 with tabs `Tasks`, `Drafts`, `Leads`, `Daily Log`, then import the CSVs from
 **Setup → Google Sheets** or `templates/`.
 

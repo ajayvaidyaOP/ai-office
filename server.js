@@ -1,9 +1,10 @@
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
-import { config, secretStatus } from './src/config.js';
+import { config, secretStatus, BRAND } from './src/config.js';
 import { store, seedDemoData, todayKey } from './src/store.js';
-import { handleCommand, COMMANDS } from './src/office.js';
+import { dashboard, missionToday, overview } from './src/metrics.js';
+import * as office from './src/office.js';
 import { AGENT_CATALOG } from './src/agents/prompts.js';
 import { testProvider } from './src/agents/index.js';
 import { providerStatus } from './src/agents/provider.js';
@@ -21,15 +22,13 @@ const MIME = {
   '.jpg': 'image/jpeg',
   '.ico': 'image/x-icon',
   '.md': 'text/markdown; charset=utf-8',
-  '.txt': 'text/plain; charset=utf-8',
   '.woff2': 'font/woff2',
+  '.txt': 'text/plain; charset=utf-8',
 };
 
 const SECURITY_HEADERS = {
   'x-content-type-options': 'nosniff',
   'referrer-policy': 'no-referrer',
-  // The preview host embeds this app in an iframe, so framing must be allowed
-  // for same-origin ancestors while scripts stay restricted to this origin.
   'content-security-policy':
     "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; font-src 'self'; frame-ancestors 'self' https:; base-uri 'self'; form-action 'self'",
 };
@@ -69,41 +68,49 @@ const readBody = (req, limit = 1_000_000) =>
     req.on('error', reject);
   });
 
-/** Optional access code: set OFFICE_ACCESS_CODE to require the x-office-code header. */
 function authorised(req) {
   const code = process.env.OFFICE_ACCESS_CODE;
   if (!code) return true;
   return req.headers['x-office-code'] === code;
 }
 
-const statePayload = () => {
+export const statePayload = () => {
   const db = store.snapshot();
   return {
+    brand: BRAND,
     meta: {
       version: config.version,
       today: todayKey(),
       timezone: config.timezone,
       settings: db.meta.settings,
       lastReportAt: db.meta.lastReportAt,
+      lastBriefAt: db.meta.lastBriefAt,
+      lastBrief: db.meta.lastBrief || null,
       lastProviderTest: db.meta.lastProviderTest,
       seeded: db.meta.seeded,
+      brand: BRAND,
     },
     counters: db.counters,
     tasks: db.tasks.slice().reverse(),
     drafts: db.drafts.slice().reverse(),
     leads: db.leads.slice().reverse(),
+    clients: (db.clients || []).slice().reverse(),
     dailyLog: db.dailyLog.slice().reverse(),
+    runs: (db.runs || []).slice(0, 120),
     messages: db.messages.slice(-120),
     audit: db.audit.slice(0, 200),
     usage: db.usage.slice(-14),
+    dashboard: dashboard(db),
     provider: providerStatus(),
     telegram: telegramStatus(),
     secrets: secretStatus(),
-    commands: COMMANDS,
+    commands: office.COMMANDS,
     agents: AGENT_CATALOG,
     tabs: Object.keys(TABS),
   };
 };
+
+const ok = (res, extra = {}) => sendJson(res, 200, { ok: true, ...extra, state: statePayload() });
 
 function listDocs() {
   const dir = path.join(config.root, 'docs');
@@ -127,7 +134,7 @@ function serveStatic(req, res, pathname) {
     return res.end('Forbidden');
   }
   if (!fs.existsSync(filePath) || fs.statSync(filePath).isDirectory()) {
-    filePath = path.join(config.publicDir, 'index.html'); // SPA fallback
+    filePath = path.join(config.publicDir, 'index.html');
   }
   const ext = path.extname(filePath).toLowerCase();
   const stream = fs.createReadStream(filePath);
@@ -140,15 +147,25 @@ function serveStatic(req, res, pathname) {
   stream.on('error', () => res.end());
 }
 
+/** Wrap an action so every route returns {ok, …data, state} or a clean 400. */
+const action = (fn) => async (req, res, body, params = {}) => {
+  try {
+    const data = await fn(body, params);
+    return ok(res, data);
+  } catch (error) {
+    return sendJson(res, 400, { ok: false, error: error.message });
+  }
+};
+
 async function route(req, res, url) {
   const { pathname, searchParams } = url;
+  const method = req.method;
 
   if (pathname === '/healthz') {
-    return sendJson(res, 200, { ok: true, version: config.version, time: new Date().toISOString() });
+    return sendJson(res, 200, { ok: true, name: BRAND.name, version: config.version, time: new Date().toISOString() });
   }
 
-  // Telegram calls this without our access code, so it is checked separately.
-  if (pathname === '/api/webhook/telegram' && req.method === 'POST') {
+  if (pathname === '/api/webhook/telegram' && method === 'POST') {
     const secret = config.telegram.webhookSecret;
     if (secret && req.headers['x-telegram-bot-api-secret-token'] !== secret) {
       return sendJson(res, 401, { ok: false, error: 'Bad webhook secret' });
@@ -166,34 +183,135 @@ async function route(req, res, url) {
     return sendJson(res, 401, { ok: false, error: 'Add the x-office-code header' });
   }
 
-  if (pathname === '/api/state' && req.method === 'GET') {
-    return sendJson(res, 200, statePayload());
-  }
+  if (pathname === '/api/state' && method === 'GET') return sendJson(res, 200, statePayload());
 
-  if (pathname === '/api/docs' && req.method === 'GET') {
-    return sendJson(res, 200, { docs: listDocs() });
-  }
+  if (pathname === '/api/docs' && method === 'GET') return sendJson(res, 200, { docs: listDocs() });
 
   const docMatch = pathname.match(/^\/api\/docs\/([a-z0-9._-]+)$/i);
-  if (docMatch && req.method === 'GET') {
+  if (docMatch && method === 'GET') {
     const file = docMatch[1].endsWith('.md') ? docMatch[1] : `${docMatch[1]}.md`;
     const filePath = path.join(config.root, 'docs', path.basename(file));
     if (!fs.existsSync(filePath)) return sendJson(res, 404, { ok: false, error: 'Doc not found' });
     return sendJson(res, 200, { ok: true, file, markdown: fs.readFileSync(filePath, 'utf8') });
   }
 
-  if (pathname === '/api/command' && req.method === 'POST') {
-    try {
-      const body = await readBody(req);
+  /* ── Command console ─────────────────────────────────────── */
+  if (pathname === '/api/command' && method === 'POST') {
+    return action(async (body) => {
       const raw = String(body.raw || '').slice(0, 4000);
-      const result = await handleCommand({ raw, actor: body.actor || 'owner', channel: 'web' });
-      return sendJson(res, 200, { ...result, state: statePayload() });
-    } catch (error) {
-      return sendJson(res, 400, { ok: false, error: error.message });
+      const result = await office.handleCommand({ raw, actor: body.actor || 'owner', channel: 'web' });
+      return result;
+    })(req, res, await readBody(req));
+  }
+
+  /* ── Tasks ───────────────────────────────────────────────── */
+  if (pathname === '/api/tasks' && method === 'POST') {
+    return action(async (body) => office.createTasks(body.request, body.actor || 'owner'))(req, res, await readBody(req));
+  }
+  const taskMatch = pathname.match(/^\/api\/tasks\/(T-\d{4})(?:\/(status))?$/i);
+  if (taskMatch) {
+    const id = taskMatch[1].toUpperCase();
+    if (method === 'DELETE') {
+      return action(async () => office.deleteTask(id))(req, res, {});
+    }
+    if (method === 'POST' && taskMatch[2]) {
+      return action(async (body) => office.updateTaskStatus(id, body.status || 'Done', body.reason || ''))(
+        req,
+        res,
+        await readBody(req),
+      );
     }
   }
 
-  if (pathname === '/api/settings' && req.method === 'POST') {
+  /* ── Drafts and approvals ────────────────────────────────── */
+  if (pathname === '/api/drafts' && method === 'POST') {
+    return action(async (body) => office.createDraft(body, body.actor || 'owner'))(req, res, await readBody(req));
+  }
+  const decisionMatch = pathname.match(/^\/api\/drafts\/(D-\d{4})\/decision$/i);
+  if (decisionMatch && method === 'POST') {
+    const id = decisionMatch[1].toUpperCase();
+    return action(async (body) =>
+      office.decideDraft({ id, decision: body.decision, feedback: body.feedback || '' }, body.actor || 'owner'),
+    )(req, res, await readBody(req));
+  }
+
+  /* ── Leads / client finder ───────────────────────────────── */
+  if (pathname === '/api/leads' && method === 'POST') {
+    return action(async (body) =>
+      office.addLeads(
+        { niche: body.niche, location: body.location, sourceUrl: body.sourceUrl, notes: body.notes },
+        body.actor || 'owner',
+      ),
+    )(req, res, await readBody(req));
+  }
+  const leadMatch = pathname.match(/^\/api\/leads\/(L-\d{4})(?:\/(verify|stage|promote|followup))?$/i);
+  if (leadMatch) {
+    const id = leadMatch[1].toUpperCase();
+    const verb = leadMatch[2];
+    if (verb === 'verify' && method === 'POST') {
+      return action(async () => office.verifyLead(id))(req, res, {});
+    }
+    if (verb === 'promote' && method === 'POST') {
+      return action(async () => office.promoteLead(id))(req, res, {});
+    }
+    if (verb === 'stage' && method === 'POST') {
+      return action(async (body) => office.setLeadStage(id, body.stage))(req, res, await readBody(req));
+    }
+    if (verb === 'followup' && method === 'POST') {
+      return action(async (body) => office.setFollowUp({ kind: 'lead', id, date: body.date }))(
+        req,
+        res,
+        await readBody(req),
+      );
+    }
+  }
+  if (pathname === '/api/find' && method === 'POST') {
+    return action(async (body) => office.createFindPlan({ niche: body.niche, location: body.location, notes: body.notes }))(
+      req,
+      res,
+      await readBody(req),
+    );
+  }
+
+  /* ── Clients ─────────────────────────────────────────────── */
+  if (pathname === '/api/clients' && method === 'POST') {
+    return action(async (body) => office.addClient(body, body.actor || 'owner'))(req, res, await readBody(req));
+  }
+  const clientMatch = pathname.match(/^\/api\/clients\/(C-\d{4})(?:\/(stage|notes|proposal|followup))?$/i);
+  if (clientMatch) {
+    const id = clientMatch[1].toUpperCase();
+    const verb = clientMatch[2];
+    if (verb === 'stage' && method === 'POST') {
+      return action(async (body) => office.setClientStage(id, body.stage))(req, res, await readBody(req));
+    }
+    if (verb === 'notes' && method === 'POST') {
+      return action(async (body) => office.upsertClientNotes(id, body.notes))(req, res, await readBody(req));
+    }
+    if (verb === 'proposal' && method === 'POST') {
+      return action(async () => office.createProposal(id))(req, res, {});
+    }
+    if (verb === 'followup' && method === 'POST') {
+      return action(async (body) => office.setFollowUp({ kind: 'client', id, date: body.date }))(
+        req,
+        res,
+        await readBody(req),
+      );
+    }
+  }
+
+  /* ── Agents: brief, report, finder ───────────────────────── */
+  if (pathname === '/api/brief' && method === 'POST') {
+    return action(async () => office.createBrief())(req, res, {});
+  }
+  if (pathname === '/api/report' && method === 'POST') {
+    return action(async () => office.generateReport())(req, res, {});
+  }
+  if (pathname === '/api/mission' && method === 'GET') {
+    return sendJson(res, 200, { ok: true, mission: missionToday(store.db), overview: overview(store.db) });
+  }
+
+  /* ── Settings, provider, data ────────────────────────────── */
+  if (pathname === '/api/settings' && method === 'POST') {
     try {
       const body = await readBody(req);
       const settings = store.updateSettings({
@@ -202,44 +320,49 @@ async function route(req, res, url) {
         ollamaModel: typeof body.ollamaModel === 'string' ? body.ollamaModel.trim().slice(0, 80) : undefined,
         geminiModel: typeof body.geminiModel === 'string' ? body.geminiModel.trim().slice(0, 80) : undefined,
         maxCallsPerDay: Number(body.maxCallsPerDay) > 0 ? Math.min(Number(body.maxCallsPerDay), 5000) : undefined,
+        companyName: typeof body.companyName === 'string' ? body.companyName.trim().slice(0, 80) : undefined,
+        ownerName: typeof body.ownerName === 'string' ? body.ownerName.trim().slice(0, 60) : undefined,
+        monthlyTarget: Number(body.monthlyTarget) >= 0 ? Number(body.monthlyTarget) : undefined,
       });
       store.audit('settings.updated', { actor: 'owner', detail: JSON.stringify(settings) });
-      return sendJson(res, 200, { ok: true, settings, state: statePayload() });
+      return ok(res, { settings });
     } catch (error) {
       return sendJson(res, 400, { ok: false, error: error.message });
     }
   }
 
-  if (pathname === '/api/provider/test' && req.method === 'POST') {
+  if (pathname === '/api/provider/test' && method === 'POST') {
     const result = await testProvider();
-    store.audit('provider.tested', { detail: result.ok ? `${result.provider} ok` : result.error || 'failed', level: result.ok ? 'info' : 'warn' });
-    return sendJson(res, 200, { ...result, provider: providerStatus(), state: statePayload() });
+    store.audit('provider.tested', {
+      detail: result.ok ? `${result.provider} ok` : result.error || 'failed',
+      level: result.ok ? 'info' : 'warn',
+    });
+    return ok(res, { ...result, provider: providerStatus() });
   }
 
-  if (pathname === '/api/reset' && req.method === 'POST') {
+  if (pathname === '/api/reset' && method === 'POST') {
     try {
       const body = await readBody(req);
       store.reset({ seed: Boolean(body.seed) });
-      store.audit('office.reset', { detail: body.seed ? 'reset + demo data' : 'reset to empty' });
-      if (body.seed) seedDemoData(store);
-      return sendJson(res, 200, { ok: true, state: statePayload() });
+      store.audit('office.reset', { detail: body.seed ? 'reset + demo data' : 'reset to empty', level: 'warn' });
+      return ok(res);
     } catch (error) {
       return sendJson(res, 400, { ok: false, error: error.message });
     }
   }
 
-  if (pathname === '/api/export/all' && req.method === 'GET') {
+  /* ── Exports ─────────────────────────────────────────────── */
+  if (pathname === '/api/export/all' && method === 'GET') {
     const payload = {};
     for (const tab of Object.keys(TABS)) payload[tab] = tabCsv(tab);
     return sendJson(res, 200, { ok: true, generatedAt: new Date().toISOString(), tabs: payload });
   }
 
-  const exportMatch = pathname.match(/^\/api\/export\/(tasks|drafts|leads|daily-log|daily%20log)$/i);
-  if (exportMatch && req.method === 'GET') {
-    const key = decodeURIComponent(exportMatch[1]).toLowerCase();
-    const tab = key.startsWith('daily') ? 'Daily Log' : key.charAt(0).toUpperCase() + key.slice(1);
-    const json = searchParams.get('format') === 'json';
-    if (json) return sendJson(res, 200, { tab, rows: tabCsv(tab).split('\n') });
+  const exportMatch = pathname.match(/^\/api\/export\/(tasks|drafts|leads|clients|daily-log)$/i);
+  if (exportMatch && method === 'GET') {
+    const key = exportMatch[1].toLowerCase();
+    const tab = key === 'daily-log' ? 'Daily Log' : key.charAt(0).toUpperCase() + key.slice(1);
+    if (searchParams.get('format') === 'json') return sendJson(res, 200, { tab, rows: tabCsv(tab).split('\n') });
     const body = tabCsv(tab);
     res.writeHead(200, {
       ...SECURITY_HEADERS,
@@ -250,10 +373,7 @@ async function route(req, res, url) {
     return res.end(body);
   }
 
-  if (pathname.startsWith('/api/')) {
-    return sendJson(res, 404, { ok: false, error: 'Unknown API route' });
-  }
-
+  if (pathname.startsWith('/api/')) return sendJson(res, 404, { ok: false, error: 'Unknown API route' });
   return serveStatic(req, res, pathname);
 }
 
@@ -266,13 +386,11 @@ const server = http.createServer((req, res) => {
   });
 });
 
-if (config.seedDemo && !store.db.meta.seeded && store.db.tasks.length === 0) {
-  seedDemoData(store);
-}
+if (config.seedDemo && !store.db.meta.seeded) seedDemoData(store);
 
 server.listen(config.port, config.host, () => {
   const base = `http://localhost:${config.port}`;
-  console.log(`\n  🏢 AI Digital Office ${config.version}`);
+  console.log(`\n  🛡️  ${BRAND.name} ${config.version}`);
   console.log(`  ➜ Console:  ${base}`);
   console.log(`  ➜ Health:   ${base}/healthz`);
   console.log(`  ➜ Provider: ${providerStatus().configured} (offline rules always available)`);

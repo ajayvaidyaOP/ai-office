@@ -18,16 +18,36 @@ The Telegram webhook is exempt (it uses its own secret header).
 | Method | Path | Purpose |
 | --- | --- | --- |
 | GET | `/healthz` | liveness + version |
-| GET | `/api/state` | full office state (tasks, drafts, leads, log, audit, provider) |
+| GET | `/api/state` | full office state: tasks, drafts, leads, clients, log, audit, settings, provider **+ computed `dashboard`** |
+| GET | `/api/mission` | today's ranked focus list + the office health score |
 | POST | `/api/command` | run any command: `{ "raw": "/task ..." }` |
-| POST | `/api/settings` | provider, models, daily cap |
+| POST | `/api/tasks` | create a task directly |
+| POST | `/api/tasks/:id/status` | `{ "status": "Done" | "In progress" | "Blocked", "note" }` |
+| DELETE | `/api/tasks/:id` | delete a task (audited) |
+| POST | `/api/drafts` | create a gated draft `{ "kind", "title", "body" }` |
+| POST | `/api/drafts/:id/decision` | `{ "decision": "approve" \| "revise" \| "reject", "feedback" }` |
+| POST | `/api/leads` | add leads `{ "leads": [{ businessName, niche, location, sourceUrl, notes }] }` |
+| POST | `/api/leads/:id/verify` | mark verified by a human |
+| POST | `/api/leads/:id/stage` | `{ "stage": "Contacted" }` |
+| POST | `/api/leads/:id/promote` | convert a verified lead into a client |
+| POST | `/api/leads/:id/followup` | `{ "date": "2026-11-02" }` |
+| POST | `/api/clients` | create a client `{ company, contact, niche, stage, value, nextFollowUp }` |
+| POST | `/api/clients/:id/stage` | move a client through the pipeline |
+| POST | `/api/clients/:id/notes` | replace the notes field |
+| POST | `/api/clients/:id/proposal` | create a gated proposal draft |
+| POST | `/api/clients/:id/followup` | set the next follow-up date |
+| POST | `/api/find` | `{ niche, location, notes }` → Client Finder research plan |
+| POST | `/api/brief` | generate the morning brief |
+| POST | `/api/report` | generate today's daily report |
+| POST | `/api/settings` | provider, models, daily cap, company/brand, currency, target |
 | POST | `/api/provider/test` | force a connection test |
 | POST | `/api/reset` | wipe data: `{ "seed": false }` |
-| GET | `/api/export/all` | all four tabs as CSV text in JSON |
+| GET | `/api/export/all` | all five tabs as CSV text in JSON |
 | GET | `/api/export/tasks` | Tasks CSV download |
 | GET | `/api/export/drafts` | Drafts CSV download |
 | GET | `/api/export/leads` | Leads CSV download |
 | GET | `/api/export/daily-log` | Daily Log CSV download |
+| GET | `/api/export/clients` | Clients CSV download |
 | GET | `/api/docs` | list guide chapters |
 | GET | `/api/docs/:slug` | one chapter as markdown |
 | POST | `/api/webhook/telegram` | Telegram updates (secret header) |
@@ -151,22 +171,46 @@ Task:
   "status": "Pending", "notes": "…", "provider": "offline" }
 ```
 
-Draft:
+Draft (one gate for content, outreach and proposals):
 
 ```json
-{ "id": "D-0001", "taskId": "T-0001", "platform": "Instagram", "draft": "…",
+{ "id": "D-0001", "taskId": "T-0001", "kind": "content", "clientId": "",
+  "platform": "Instagram", "title": "Caption — monsoon offer", "draft": "…",
   "status": "Awaiting approval", "version": 1, "feedback": "",
   "qa": { "decision": "approve", "issues": [], "suggested_revision": "" },
-  "history": [] }
+  "history": [], "reviewedBy": "", "reviewedAt": "" }
 ```
 
 Lead:
 
 ```json
-{ "id": "L-0001", "businessName": "Example Studio", "website": "",
-  "niche": "design agencies", "sourceUrl": "https://example.com/directory",
-  "fitReason": "…", "contactStatus": "Not contacted",
-  "reviewStatus": "Needs human verification", "nextAction": "…" }
+{ "id": "L-0001", "businessName": "Example Studio", "website": "", "contact": "",
+  "niche": "design agencies", "location": "Pune",
+  "sourceUrl": "https://example.com/directory", "fitReason": "…",
+  "stage": "Verified", "score": 81,
+  "reviewStatus": "Verified by human", "verifiedAt": "2026-10-27T10:00:00.000Z",
+  "nextFollowUp": "2026-11-02", "notes": "", "clientId": "" }
+```
+
+Client:
+
+```json
+{ "id": "C-0001", "company": "Aurora Interiors", "contact": "Meera",
+  "niche": "interior design", "location": "Pune", "stage": "Negotiation",
+  "value": 45000, "sourceUrl": "https://…", "notes": "…",
+  "nextFollowUp": "2026-10-30", "leadId": "L-0002",
+  "createdAt": "…", "updatedAt": "…" }
+```
+
+Dashboard block returned by `/api/state`:
+
+```json
+{ "overview": { "awaiting": 2, "pipeline": { "openValue": 75000, "wonValue": 85000,
+  "winRate": 50 }, "tasks": { "open": 5, "overdue": 1 }, "clients": { "total": 4 } },
+  "mission": [ { "kind": "approval", "title": "…", "meta": "…" } ],
+  "activity": [ { "date": "2026-10-27", "runs": 4, "drafts": 2 } ],
+  "agents": [ { "agent": "Content", "runs": 6, "successRate": 100 } ],
+  "money": { "monthlyTarget": 150000, "wonValue": 85000 } }
 ```
 
 Audit event:
