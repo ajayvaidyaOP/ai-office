@@ -69,6 +69,16 @@ export const config = {
     requestTimeoutMs: num(process.env.AI_TIMEOUT_MS, 60_000),
   },
 
+  sourcing: {
+    provider: (process.env.SOURCING_PROVIDER || 'auto').toLowerCase(),
+    placesKey: process.env.GOOGLE_PLACES_API_KEY || '',
+    overpassUrl: process.env.OVERPASS_URL || 'https://overpass-api.de/api/interpreter',
+    placesUrl: process.env.PLACES_URL || 'https://places.googleapis.com/v1/places:searchText',
+    nominatimUrl: process.env.NOMINATIM_URL || 'https://nominatim.openstreetmap.org',
+    userAgent: process.env.SOURCING_USER_AGENT || 'AI-Invincible-Office/2.0 (lead research; contact via app)',
+    requestTimeoutMs: num(process.env.SOURCING_TIMEOUT_MS, 30_000),
+  },
+
   sheets: {
     spreadsheetId: process.env.GOOGLE_SHEETS_ID || '',
     serviceAccountFile: process.env.GOOGLE_SERVICE_ACCOUNT_FILE || '',
@@ -87,6 +97,7 @@ export const hasSecret = (value) => Boolean(value && String(value).trim());
 
 /** True when a usable secret is configured — never returns the secret itself. */
 export const secretStatus = () => ({
+  placesApiKey: hasSecret(config.sourcing.placesKey),
   telegramBotToken: hasSecret(config.telegram.botToken),
   geminiKey: hasSecret(config.ai.geminiKey),
   webhookSecret: hasSecret(config.telegram.webhookSecret),

@@ -63,6 +63,66 @@ Either way it **cannot invent progress**, because it is given no other data.
 
 ## 3. Client Finder
 
+Two modes. **Live search** fetches real businesses from a public dataset.
+**Research plan** gives you the manual playbook when you want to do it by hand.
+
+### 3a. Live search — real businesses, real sources
+
+`POST /api/source { niche, location, limit, provider }`
+
+| Provider | Cost | Needs a key | What you get |
+| --- | --- | --- | --- |
+| `osm` (default) | free | no | Business name, address, website, phone, opening hours, map link |
+| `places` | paid per request | `GOOGLE_PLACES_API_KEY` | The above + rating, review count, live business status |
+
+`provider: "auto"` picks Places when a key exists and OpenStreetMap otherwise.
+
+**What actually happens**
+
+1. The city name is geocoded (Nominatim) to a bounding box.
+2. The niche is mapped to map tags — `cafes` → `amenity=cafe`, `dentists` →
+   `amenity=dentist`, `gyms` → `leisure=fitness_centre`, and 20 more.
+3. Businesses are fetched inside that box.
+4. Rows without a name are dropped. Duplicate names are collapsed.
+5. Every row is scored for **sales fit** (below), best first.
+
+**Nothing is invented here.** Each row carries the exact URL it came from —
+`openstreetmap.org/node/123` or a Google Maps link. If the upstream service is
+unreachable, the call fails with a plain message. It never fills the gap with
+plausible-looking fake businesses.
+
+**The sales-fit score** — the point is to rank who to contact first:
+
+| Signal | Points | Why |
+| --- | --- | --- |
+| No website | **+20** | Strongest pitch: they are invisible online |
+| Phone published | **+10** | You can actually reach them |
+| No phone | **−6** | An unreachable lead is a dead lead |
+| 4.4★ or better | +14 | Customers like it — the offer lands |
+| 200+ reviews | +14 | Established and busy |
+| 50+ reviews | +11 | Active customer base |
+| Opening hours published | +4 | Probably still operating |
+| Address present | +3 | Verifiable |
+
+So a 4.6★ business with 300 reviews, a phone number and **no website** scores
+~81 — that is your first call. A business with a polished website and no
+reviews scores ~39.
+
+### 3b. Importing
+
+`POST /api/source/import { niche, location, businesses[] }`
+
+Tick the rows you want in the UI, then **Add selected as leads**.
+
+- Rows are written with their **real** fields — nothing is regenerated.
+- Every row lands as **"Needs human verification"**. A dataset cannot tell you
+  the shop is still open, or that the owner is the decision maker.
+- A business already saved (same name + city, or same website) is **refused**
+  and reported back, so you never contact the same lead twice.
+- Each import is written to the audit trail.
+
+### 3c. Research plan (manual mode)
+
 `POST /api/find { niche, location, notes }`
 
 Returns a research plan, never a list of invented businesses:
@@ -73,7 +133,7 @@ Returns a research plan, never a list of invented businesses:
 - `checklist` — how to verify a business is real and relevant
 - `red_flags` — signals this is a waste of time
 
-Then you add rows with `/lead` or the finder form. Each row stores:
+Then you add rows with `/lead`, the finder form, or the live import. Each row stores:
 
 | Field | Rule |
 | --- | --- |

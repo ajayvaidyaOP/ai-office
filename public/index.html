@@ -299,6 +299,38 @@
                   <div class="lead-stages" id="lead-stages"></div>
                 </div>
                 <div class="card panel">
+                  <header class="panel-head">
+                    <div><h3>Live search</h3><p>Real businesses from a public dataset — every row carries its source link.</p></div>
+                    <span class="tag" id="source-engine">OpenStreetMap · free</span>
+                  </header>
+                  <form id="source-form" class="form compact">
+                    <div class="form-row">
+                      <label>Niche<input name="niche" placeholder="cafés, dentists, gyms…" required /></label>
+                      <label>City<input name="location" placeholder="Pune" required /></label>
+                    </div>
+                    <div class="form-row">
+                      <label>How many
+                        <select name="limit">
+                          <option value="10">10</option>
+                          <option value="20" selected>20</option>
+                          <option value="40">40</option>
+                        </select>
+                      </label>
+                      <label>Source
+                        <select name="provider">
+                          <option value="auto">Auto (best available)</option>
+                          <option value="osm">OpenStreetMap (free)</option>
+                          <option value="places">Google Places (key)</option>
+                        </select>
+                      </label>
+                    </div>
+                    <button class="btn btn-primary" type="submit" id="source-submit">
+                      <svg class="ic"><use href="#i-target" /></svg>Find real businesses
+                    </button>
+                  </form>
+                  <div id="source-result" class="source-result"></div>
+                </div>
+                <div class="card panel">
                   <header class="panel-head"><div><h3>Add leads manually</h3><p>Paste what you saw, one business per line.</p></div></header>
                   <form id="lead-form" class="form compact">
                     <div class="form-row">

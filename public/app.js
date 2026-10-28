@@ -706,6 +706,114 @@ function renderClients() {
 
 let finderPlan = null;
 
+let sourceResults = null;
+let sourceBusy = false;
+
+function renderSourceResults() {
+  const mount = $('#source-result');
+  if (!mount) return;
+
+  if (sourceBusy) {
+    mount.innerHTML = `<div class="source-loading"><span class="spinner"></span>Searching public data…</div>`;
+    return;
+  }
+
+  if (!sourceResults) {
+    mount.innerHTML = '';
+    return;
+  }
+
+  if (sourceResults.error) {
+    mount.innerHTML = `
+      <div class="source-error">
+        <b>${esc(sourceResults.error)}</b>
+        <p>Nothing was saved and nothing was invented. The research plan above still works.</p>
+      </div>`;
+    return;
+  }
+
+  const rows = sourceResults.results || [];
+  if (!rows.length) {
+    mount.innerHTML = `
+      <div class="source-error">
+        <b>No usable listings found.</b>
+        <p>Try a bigger city or a different word — "coffee" instead of "cafés", "dental clinic" instead of "dentist".</p>
+      </div>`;
+    return;
+  }
+
+  mount.innerHTML = `
+    <div class="source-head">
+      <div>
+        <b>${rows.length} businesses · ${esc(sourceResults.engine)}</b>
+        <p>${esc(sourceResults.area || sourceResults.location)} · ${sourceResults.scanned} rows scanned · ${sourceResults.ms}ms</p>
+      </div>
+      <div class="source-actions">
+        <button class="btn btn-ghost btn-sm" data-source-select="all">Select all</button>
+        <button class="btn btn-ghost btn-sm" data-source-select="none">Clear</button>
+      </div>
+    </div>
+    <div class="source-list">
+      ${rows
+        .map(
+          (row, index) => `
+        <label class="source-row">
+          <input type="checkbox" data-source-row="${index}" ${index < 5 ? 'checked' : ''} />
+          <div class="source-main">
+            <div class="source-title">
+              <b>${esc(row.businessName)}</b>
+              <span class="score-chip ${row.score >= 60 ? 'is-hot' : row.score >= 40 ? 'is-warm' : ''}">${row.score}</span>
+              ${row.rating ? `<span class="mini-tag">${Number(row.rating).toFixed(1)}★</span>` : ''}
+              ${row.reviews ? `<span class="mini-tag">${row.reviews} reviews</span>` : ''}
+              ${row.website ? '' : '<span class="mini-tag is-alert">no website</span>'}
+            </div>
+            <p class="source-addr">${esc(row.address || row.category || 'Address not listed')}</p>
+            <div class="source-signals">${(row.signals || []).slice(0, 3).map((x) => `<span>${esc(x)}</span>`).join('')}</div>
+            <a class="source-link" href="${esc(row.sourceUrl)}" target="_blank" rel="noopener noreferrer">
+              <svg class="ic"><use href="#i-external" /></svg>${esc(row.sourceName || 'Source')} — check it yourself
+            </a>
+          </div>
+        </label>`,
+        )
+        .join('')}
+    </div>
+    <div class="source-foot">
+      <p>${(sourceResults.caveats || []).map((c) => esc(c)).join(' ')}</p>
+      <button class="btn btn-primary" data-source-import="1">
+        <svg class="ic"><use href="#i-plus" /></svg>Add selected as leads
+      </button>
+    </div>`;
+}
+
+async function runSourceSearch(payload) {
+  sourceBusy = true;
+  sourceResults = null;
+  renderSourceResults();
+  try {
+    const data = await api('/api/source', { method: 'POST', body: JSON.stringify(payload) });
+    sourceResults = data.source || data;
+    if (data.state) ui.state = data.state;
+  } catch (error) {
+    sourceResults = { error: error.message };
+  } finally {
+    sourceBusy = false;
+    renderSourceResults();
+  }
+}
+
+async function loadSourcingStatus() {
+  try {
+    const status = await api('/api/source/status');
+    const pill = $('#source-engine');
+    if (pill) {
+      pill.textContent = status.placesKey ? 'Google Places ready' : 'OpenStreetMap · free';
+      pill.classList.toggle('is-good', Boolean(status.placesKey));
+    }
+  } catch {
+    /* non-critical */
+  }
+}
+
 function renderFinder() {
   const state = ui.state;
   if (!state) return;
@@ -725,6 +833,7 @@ function renderFinder() {
     .join('');
 
   if (finderPlan) renderFinderPlan(finderPlan);
+  renderSourceResults();
 }
 
 function renderFinderPlan(plan) {
@@ -999,6 +1108,7 @@ function renderSetup() {
     ['Telegram bot token', secrets.telegramBotToken ? 'stored in .env' : 'not set', secrets.telegramBotToken],
     ['Telegram allow-list', `${settings.allowedUserIds?.length || 0} user(s)`, (settings.allowedUserIds?.length || 0) > 0],
     ['Gemini API key', secrets.geminiKey ? 'set' : 'optional', secrets.geminiKey],
+    ['Google Places key', secrets.placesApiKey ? 'set — live lead search' : 'optional — OSM is free', secrets.placesApiKey],
     ['Webhook secret', secrets.webhookSecret ? 'set' : 'optional', secrets.webhookSecret],
     ['Google Sheet ID', secrets.googleSheetId ? 'set' : 'CSV export available', secrets.googleSheetId],
   ];
@@ -1901,6 +2011,71 @@ function bindGlobal() {
     }
   });
 
+  $('#source-form').addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const form = new FormData(event.target);
+    await runSourceSearch({
+      niche: form.get('niche'),
+      location: form.get('location'),
+      limit: Number(form.get('limit') || 20),
+      provider: form.get('provider') || 'auto',
+    });
+  });
+
+  /* live search result controls (delegated) */
+  document.addEventListener('click', async (event) => {
+    const selectAll = event.target.closest('[data-source-select]');
+    if (selectAll) {
+      const on = selectAll.dataset.sourceSelect === 'all';
+      document.querySelectorAll('[data-source-row]').forEach((box) => {
+        box.checked = on;
+      });
+      return;
+    }
+
+    const importBtn = event.target.closest('[data-source-import]');
+    if (importBtn && sourceResults?.results) {
+      const picked = [...document.querySelectorAll('[data-source-row]')]
+        .filter((box) => box.checked)
+        .map((box) => sourceResults.results[Number(box.dataset.sourceRow)])
+        .filter(Boolean);
+
+      if (!picked.length) {
+        toast('Tick at least one business first.', 'bad');
+        return;
+      }
+
+      importBtn.disabled = true;
+      try {
+        const result = await api('/api/source/import', {
+          method: 'POST',
+          body: JSON.stringify({
+            niche: sourceResults.niche,
+            location: sourceResults.location,
+            businesses: picked,
+          }),
+        });
+        if (result.state) ui.state = result.state;
+        renderAll();
+        const skipped = result.skipped || [];
+        if (result.imported && skipped.length) {
+          toast(`${result.imported} added · ${skipped.length} skipped (${skipped[0].reason})`, 'warn');
+        } else if (result.imported) {
+          toast(`${result.imported} lead(s) added — verify each one before outreach.`, 'good');
+        } else {
+          toast(`Nothing added — ${skipped[0]?.reason || 'no usable rows'}.`, 'bad');
+        }
+        document.querySelectorAll('[data-source-row]').forEach((box) => {
+          box.checked = false;
+        });
+      } catch (error) {
+        toast(error.message, 'bad');
+      } finally {
+        importBtn.disabled = false;
+      }
+    }
+  });
+
   $('#lead-form').addEventListener('submit', async (event) => {
     event.preventDefault();
     const form = new FormData(event.target);
@@ -2067,6 +2242,7 @@ async function boot() {
     return;
   }
   setView('dashboard');
+  loadSourcingStatus();
 
   let lastMessage = (ui.state?.messages || []).at(-1)?.id || '';
   setInterval(async () => {

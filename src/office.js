@@ -16,6 +16,7 @@ import {
   detectTone,
   scoreLead,
 } from './agents/index.js';
+import { sourceLeads, sourcingStatus } from './agents/sourcing.js';
 import { extractIds, LEAD_STAGES, offlineBrief, offlineProposal } from './agents/offline.js';
 
 export const COMMANDS = [
@@ -27,6 +28,7 @@ export const COMMANDS = [
   { command: '/revise', group: 'Approvals', description: 'Request a revision with feedback', example: '/revise D-0001 Make it shorter' },
   { command: '/reject', group: 'Approvals', description: 'Reject a draft with a reason', example: '/reject D-0001 Off brand' },
   { command: '/find', group: 'Clients', description: 'Client Finder research plan for a niche', example: '/find cafes in Pune' },
+  { command: '/source', group: 'Clients', description: 'Live search for real businesses (OSM or Google Places)', example: '/source cafes in Pune' },
   { command: '/lead', group: 'Clients', description: 'Add leads from a public source you supply', example: '/lead cafes | Pune | https://x.com | GreenLeaf — no weekly plan' },
   { command: '/verify', group: 'Clients', description: 'Mark a lead verified against its source', example: '/verify L-0001' },
   { command: '/promote', group: 'Clients', description: 'Turn a lead into a client record', example: '/promote L-0002' },
@@ -55,6 +57,7 @@ const WHATSAPP_LIKE = [
   '',
   'CLIENTS',
   '/find <niche> in <city> — research plan',
+  '/source <niche> in <city> — live search for real businesses',
   '/lead niche | city | source URL | notes — add leads',
   '/verify L-0001 · /promote L-0001 · /stage C-0001 Negotiation',
   '/outreach L-0001 · /proposal C-0001 · /clients',
@@ -406,6 +409,112 @@ export async function addLeads({ niche = 'unspecified', location = '', sourceUrl
   return { ok: true, leads, provider: result.provider };
 }
 
+/**
+ * Import rows that came from a live source (OpenStreetMap / Google Places).
+ * These are real listings, so they are written with their real fields —
+ * nothing is regenerated, and a duplicate business name is refused.
+ */
+export function importLeads({ niche = '', location = '', businesses = [], notes = '' }, actor = 'owner') {
+  if (!Array.isArray(businesses) || businesses.length === 0) {
+    throw new Error('Pick at least one business to import.');
+  }
+  if (businesses.length > 100) throw new Error('Import at most 100 rows at a time.');
+
+  const key = (value) => String(value || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  const created = [];
+  const skipped = [];
+
+  for (const biz of businesses) {
+    const name = normalise(biz.businessName);
+    const sourceUrl = normalise(biz.sourceUrl);
+
+    if (!name) {
+      skipped.push({ businessName: '(unnamed row)', reason: 'no business name' });
+      continue;
+    }
+    if (!/^https?:\/\//i.test(sourceUrl)) {
+      skipped.push({ businessName: name, reason: 'no public source URL' });
+      continue;
+    }
+
+    const website = normalise(biz.website);
+    const nameKey = key(name);
+    const placeKey = key(location);
+    const siteKey = key(website.replace(/^https?:\/\/(www\.)?/i, '').replace(/\/.*$/, ''));
+
+    const existing = store.db.leads.find((row) => {
+      const rowSite = key(String(row.website || '').replace(/^https?:\/\/(www\.)?/i, '').replace(/\/.*$/, ''));
+      if (siteKey && rowSite && siteKey === rowSite) return true;
+      return key(row.businessName) === nameKey && (!placeKey || key(row.location) === placeKey);
+    });
+    if (existing) {
+      skipped.push({ businessName: name, reason: `already saved as ${existing.id}` });
+      continue;
+    }
+
+    const ratingText =
+      Number.isFinite(Number(biz.rating)) && Number(biz.rating) > 0
+        ? `${Number(biz.rating).toFixed(1)}★ (${Number(biz.reviews) || 0} reviews)`
+        : '';
+
+    const looked = [
+      biz.category ? `listing category: ${normalise(biz.category)}` : '',
+      biz.address ? `address: ${normalise(biz.address)}` : '',
+      ratingText,
+      biz.website ? `website on file: ${normalise(biz.website)}` : 'no website listed',
+      biz.phone ? 'phone published' : 'no phone published',
+    ]
+      .filter(Boolean)
+      .join(' · ');
+
+    const signals = Array.isArray(biz.signals) ? biz.signals.filter(Boolean).join(' · ') : '';
+
+    const row = {
+      id: store.nextId('lead'),
+      createdAt: new Date().toISOString(),
+      businessName: name,
+      website,
+      phone: normalise(biz.phone),
+      address: normalise(biz.address),
+      niche: normalise(biz.category) || normalise(niche) || 'unspecified',
+      location: normalise(location),
+      sourceUrl,
+      sourceName: normalise(biz.sourceName) || 'Live search',
+      fitReason: (signals || looked).slice(0, 300),
+      contactStatus: 'Not contacted',
+      reviewStatus: 'Needs human verification',
+      stage: 'New',
+      score: 0,
+      scoreReasons: [],
+      prospectScore: Number.isFinite(Number(biz.score)) ? Number(biz.score) : null,
+      owner: actor,
+      lastTouchAt: null,
+      nextFollowUp: null,
+      notes: normalise(notes).slice(0, 300) || looked.slice(0, 300),
+      provider: 'live-search',
+      source: actor,
+    };
+
+    const scored = scoreLead(row);
+    row.score = scored.score;
+    row.scoreReasons = scored.reasons;
+
+    store.db.leads.push(row);
+    created.push(row);
+  }
+
+  if (created.length) {
+    store.save();
+    store.audit('lead.imported', {
+      actor,
+      ref: created.map((lead) => lead.id).join(','),
+      detail: `${created.length} imported · ${skipped.length} skipped`,
+    });
+  }
+
+  return { ok: true, imported: created.length, skipped, leads: created };
+}
+
 export function verifyLead(id, actor = 'owner') {
   const lead = store.db.leads.find((row) => row.id === String(id || '').toUpperCase());
   if (!lead) throw new Error(`Lead ${id} not found.`);
@@ -671,6 +780,8 @@ export async function handleCommand({ raw = '', actor = 'owner', channel = 'web'
       return commandDecision(firstWord.slice(1), rest, actor);
     case '/find':
       return commandFind(rest, actor);
+    case '/source':
+      return commandSource(rest, actor);
     case '/lead':
       return commandLead(rest, actor);
     case '/verify':
@@ -818,6 +929,118 @@ async function commandReport(actor) {
       { label: 'Morning brief', command: '/brief', tone: 'neutral' },
       { label: 'Clients', command: '/clients', tone: 'neutral' },
     ],
+  });
+}
+
+export async function runSource({ niche, location, limit, provider }, actor = 'owner') {
+  const result = await sourceLeads({ niche, location, limit, provider });
+  store.db.meta.lastSource = {
+    at: new Date().toISOString(),
+    niche: result.niche,
+    location: result.location,
+    engine: result.engine,
+    count: result.count,
+  };
+  store.save();
+  store.audit('finder.live', {
+    actor,
+    detail: `${result.engine} · ${result.count} businesses · ${result.niche} in ${result.location}`,
+  });
+  return result;
+}
+
+async function commandSource(rest, actor) {
+  const text = normalise(rest);
+  if (!text) {
+    const status = sourcingStatus();
+    return reply({
+      text: [
+        '🔎 LIVE LEAD SOURCE',
+        '',
+        'Pulls real businesses from a public dataset — every row has a real source URL.',
+        '',
+        `Engine: ${status.placesKey ? 'Google Places (key found)' : 'OpenStreetMap (free, no key)'}`,
+        '',
+        'Usage: /source cafes in Pune',
+        '       /source gyms in Mumbai --limit 30',
+        '       /source dentists in Nashik --engine osm',
+        '',
+        'Results are saved only when you import them. Nothing is invented.',
+      ].join('\n'),
+    });
+  }
+
+  const match = text.match(/^(.*?)\s+(?:in|near|around)\s+(.+)$/i);
+  const niche = match ? match[1].trim() : text;
+  let location = match ? match[2].trim() : '';
+
+  let limit = 20;
+  let provider = 'auto';
+  const limitMatch = location.match(/--limit\s+(\d+)/i) || text.match(/--limit\s+(\d+)/i);
+  if (limitMatch) limit = Number(limitMatch[1]);
+  const engineMatch = location.match(/--engine\s+(osm|places)/i) || text.match(/--engine\s+(osm|places)/i);
+  if (engineMatch) provider = engineMatch[1].toLowerCase();
+
+  location = location
+    .replace(/--limit\s+\d+/i, '')
+    .replace(/--engine\s+(osm|places)/i, '')
+    .trim();
+
+  if (!location) {
+    return reply({ text: 'Tell me the city too: /source cafes in Pune' });
+  }
+
+  let result;
+  try {
+    result = await runSource({ niche, location, limit, provider }, actor);
+  } catch (error) {
+    return reply({
+      text: [
+        `⚠️ Live search failed — ${error.message}`,
+        '',
+        'Nothing was saved and nothing was invented.',
+        'You can still use /find for the manual research plan.',
+      ].join('\n'),
+      error: true,
+    });
+  }
+
+  if (!result.count) {
+    return reply({
+      text: [
+        `🔎 LIVE SEARCH — ${result.niche} in ${result.location}`,
+        '',
+        `Engine: ${result.engine} · ${result.scanned} rows scanned · 0 usable.`,
+        '',
+        'This usually means the area is too narrow or the category is tagged differently.',
+        'Try a bigger city, or a different word (e.g. "coffee" instead of "cafes").',
+      ].join('\n'),
+    });
+  }
+
+  const top = result.results.slice(0, 12);
+  return reply({
+    text: [
+      `🔎 LIVE SEARCH — ${result.niche} in ${result.location}`,
+      `Engine: ${result.engine} · ${result.scanned} scanned · ${result.count} usable · ${result.ms}ms`,
+      '',
+      ...top.map((row) => {
+        const bits = [
+          `${row.score}/100`,
+          row.rating ? `${Number(row.rating).toFixed(1)}★` : null,
+          row.reviews ? `${row.reviews} reviews` : null,
+          row.website ? 'website' : 'NO website',
+          row.phone ? 'phone' : null,
+        ].filter(Boolean);
+        return `   ${row.businessName} — ${bits.join(' · ')}\n     ${row.address || row.category || 'address not listed'}\n     ${row.sourceUrl}`;
+      }),
+      result.count > top.length ? `\n   …and ${result.count - top.length} more. Open Client Finder to see all.` : '',
+      '',
+      'These are real listings, not guesses — but open the source link before you write to anyone.',
+      'Open Client Finder → Live search to tick the good ones and add them as leads.',
+    ]
+      .filter(Boolean)
+      .join('\n'),
   });
 }
 

@@ -8,6 +8,7 @@ import * as office from './src/office.js';
 import { AGENT_CATALOG } from './src/agents/prompts.js';
 import { testProvider } from './src/agents/index.js';
 import { providerStatus } from './src/agents/provider.js';
+import { sourcingStatus } from './src/agents/sourcing.js';
 import { TABS, tabCsv } from './src/sheets.js';
 import { handleTelegramUpdate, startTelegramPolling, telegramStatus } from './src/channels/telegram.js';
 
@@ -184,6 +185,7 @@ async function route(req, res, url) {
   }
 
   if (pathname === '/api/state' && method === 'GET') return sendJson(res, 200, statePayload());
+  if (pathname === '/api/source/status' && method === 'GET') return sendJson(res, 200, sourcingStatus());
 
   if (pathname === '/api/docs' && method === 'GET') return sendJson(res, 200, { docs: listDocs() });
 
@@ -265,6 +267,34 @@ async function route(req, res, url) {
       );
     }
   }
+  if (pathname === '/api/source' && method === 'POST') {
+    return action(async (body) =>
+      office.runSource(
+        {
+          niche: body.niche,
+          location: body.location,
+          limit: body.limit,
+          provider: body.provider,
+        },
+        body.actor || 'owner',
+      ),
+    )(req, res, await readBody(req));
+  }
+
+  if (pathname === '/api/source/import' && method === 'POST') {
+    return action(async (body) =>
+      office.importLeads(
+        {
+          niche: body.niche,
+          location: body.location,
+          businesses: body.businesses,
+          notes: body.notes,
+        },
+        body.actor || 'owner',
+      ),
+    )(req, res, await readBody(req));
+  }
+
   if (pathname === '/api/find' && method === 'POST') {
     return action(async (body) => office.createFindPlan({ niche: body.niche, location: body.location, notes: body.notes }))(
       req,

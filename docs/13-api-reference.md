@@ -36,6 +36,9 @@ The Telegram webhook is exempt (it uses its own secret header).
 | POST | `/api/clients/:id/notes` | replace the notes field |
 | POST | `/api/clients/:id/proposal` | create a gated proposal draft |
 | POST | `/api/clients/:id/followup` | set the next follow-up date |
+| GET | `/api/source/status` | which live provider is configured |
+| POST | `/api/source` | `{ niche, location, limit, provider }` → real businesses from OSM or Google Places |
+| POST | `/api/source/import` | `{ niche, location, businesses[] }` → saves ticked rows as leads (deduped) |
 | POST | `/api/find` | `{ niche, location, notes }` → Client Finder research plan |
 | POST | `/api/brief` | generate the morning brief |
 | POST | `/api/report` | generate today's daily report |
@@ -148,6 +151,10 @@ curl -s localhost:3000/api/webhook/telegram \
 | `ALLOWED_TELEGRAM_USER_IDS` | `ALLOWED_USER_IDS` | numeric IDs only |
 | `TELEGRAM_MODE` | `off` | `polling` to start the connector |
 | `WEBHOOK_SECRET` | *(unset)* | `secret_token` for webhook mode |
+| `SOURCING_PROVIDER` | `auto` | `auto`, `osm`, `places` |
+| `GOOGLE_PLACES_API_KEY` | *(unset)* | enables the paid Google Places provider |
+| `OVERPASS_URL` | `https://overpass-api.de/api/interpreter` | Overpass endpoint |
+| `NOMINATIM_URL` | `https://nominatim.openstreetmap.org` | geocoding endpoint |
 | `GOOGLE_SHEETS_ID` | *(unset)* | reserved for direct sync |
 | `GOOGLE_SERVICE_ACCOUNT_FILE` | *(unset)* | reserved for direct sync |
 
@@ -185,12 +192,16 @@ Lead:
 
 ```json
 { "id": "L-0001", "businessName": "Example Studio", "website": "", "contact": "",
-  "niche": "design agencies", "location": "Pune",
-  "sourceUrl": "https://example.com/directory", "fitReason": "…",
-  "stage": "Verified", "score": 81,
+  "phone": "", "address": "", "niche": "design agencies", "location": "Pune",
+  "sourceUrl": "https://example.com/directory", "sourceName": "OpenStreetMap",
+  "fitReason": "…", "stage": "Verified", "score": 81,
+  "prospectScore": 53,
   "reviewStatus": "Verified by human", "verifiedAt": "2026-10-27T10:00:00.000Z",
   "nextFollowUp": "2026-11-02", "notes": "", "clientId": "" }
 ```
+
+`score` = how well documented the lead is (source, website, fit reason, verification).
+`prospectScore` = live-search sales fit (see `14-invincible-modules.md`).
 
 Client:
 

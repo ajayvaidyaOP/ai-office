@@ -11,7 +11,8 @@ human approval gates), extended into a full working product:
 - **AI Console** — talk to your manager: `/task`, `/draft`, `/brief`, `/find`, `/clients`.
 - **Approvals inbox** — read, revise, approve or reject every draft and proposal.
 - **Clients CRM** — kanban pipeline, deal values, follow-ups, proposals, notes.
-- **Client Finder** — niche + city → search queries, directories, checklist, red flags, scored leads.
+- **Client Finder** — niche + city → **real businesses from OpenStreetMap or Google Places**, scored
+  for sales fit and imported as leads with their source links; plus a manual research playbook.
 - **Work** — tasks with owners, priorities, deadlines, blocked reasons.
 - **Calendar** — deadlines, follow-ups and approvals in one agenda.
 - **Reports** — daily log, agent health, model usage.
@@ -58,6 +59,7 @@ Dark obsidian glass, violet→cyan accents, ⌘K command palette, client drawer,
 | `/revise D-0001 <feedback>` | new version, gated again |
 | `/reject D-0001 <reason>` | records the reason |
 | `/find cafés in Pune` | Client Finder research plan (queries, directories, checklist) |
+| `/source cafés in Pune` | **live search** — real businesses with real source URLs |
 | `/lead niche \| city \| source URL \| notes` | lead rows with source URLs + fit score |
 | `/verify L-0001` | mark a lead checked by a human |
 | `/promote L-0001` | turn a lead into a client record |
