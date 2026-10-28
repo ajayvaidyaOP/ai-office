@@ -1,0 +1,10 @@
+.git
+data
+backups
+node_modules
+.check-data
+.arena
+*.zip
+.env
+.env.*
+!.env.example

@@ -1,0 +1,120 @@
+{
+  "name": "02 · Daily report — schedule to Telegram",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [{ "field": "cronExpression", "expression": "0 9 * * 1-6" }]
+        }
+      },
+      "id": "b2000000-0000-4000-8000-000000000001",
+      "name": "Every morning 09:00",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [-520, 0],
+      "notes": "Mon–Sat. Timezone comes from the n8n instance (GENERIC_TIMEZONE / TZ in docker-compose)."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:3000/api/command",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [{ "name": "content-type", "value": "application/json" }]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ raw: '/report' }) }}",
+        "options": { "timeout": 60000 }
+      },
+      "id": "b2000000-0000-4000-8000-000000000002",
+      "name": "Ask the office for a report",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-280, 0],
+      "notes": "The office reads its own stored rows, so the report cannot invent progress. Use http://localhost:3000 if n8n is not in Docker."
+    },
+    {
+      "parameters": {
+        "jsCode": "// Pick the report text out of the office response.\nconst data = $input.first().json;\nconst text = data.reply || 'Report unavailable.';\nreturn [{ json: { text, ok: Boolean(data.ok), pending: (data.state?.tasks || []).filter(t => t.status !== 'Done').length } }];"
+      },
+      "id": "b2000000-0000-4000-8000-000000000003",
+      "name": "Format",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [0, 0]
+    },
+    {
+      "parameters": {
+        "chatId": "YOUR_TELEGRAM_CHAT_ID",
+        "text": "={{ $json.text }}",
+        "additionalFields": {}
+      },
+      "id": "b2000000-0000-4000-8000-000000000004",
+      "name": "Telegram daily brief",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [240, 0],
+      "credentials": {
+        "telegramApi": { "id": "REPLACE_TELEGRAM_CREDENTIAL", "name": "Telegram account" }
+      }
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "http://host.docker.internal:3000/api/state",
+        "options": { "timeout": 15000 }
+      },
+      "id": "b2000000-0000-4000-8000-000000000005",
+      "name": "Health snapshot",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-280, 200],
+      "notes": "Optional branch: keep a copy of the raw state, or alert yourself when the office is unreachable."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "loose", "version": 2 },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ $json.reply }}",
+              "rightValue": "",
+              "operator": { "type": "string", "operation": "exists", "singleValue": true }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "b2000000-0000-4000-8000-000000000006",
+      "name": "Report exists?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [-60, 0]
+    }
+  ],
+  "connections": {
+    "Every morning 09:00": {
+      "main": [[{ "node": "Ask the office for a report", "type": "main", "index": 0 }]]
+    },
+    "Ask the office for a report": {
+      "main": [[{ "node": "Report exists?", "type": "main", "index": 0 }]]
+    },
+    "Report exists?": {
+      "main": [
+        [{ "node": "Format", "type": "main", "index": 0 }],
+        []
+      ]
+    },
+    "Format": {
+      "main": [[{ "node": "Telegram daily brief", "type": "main", "index": 0 }]]
+    }
+  },
+  "active": false,
+  "settings": { "executionOrder": "v1" },
+  "pinData": {},
+  "meta": { "templateCredsSetupCompleted": false },
+  "tags": []
+}

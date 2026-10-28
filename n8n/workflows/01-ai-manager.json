@@ -1,0 +1,187 @@
+{
+  "name": "01 · AI Manager — Telegram to Sheets",
+  "nodes": [
+    {
+      "parameters": {
+        "updates": ["message"],
+        "additionalFields": {}
+      },
+      "id": "a1000000-0000-4000-8000-000000000001",
+      "name": "Telegram Trigger",
+      "type": "n8n-nodes-base.telegramTrigger",
+      "typeVersion": 1.1,
+      "position": [-620, 0],
+      "credentials": {
+        "telegramApi": {
+          "id": "REPLACE_TELEGRAM_CREDENTIAL",
+          "name": "Telegram account"
+        }
+      },
+      "notes": "Attach your @BotFather token credential after import (Chapter 3)."
+    },
+    {
+      "parameters": {
+        "jsCode": "// Chapter 9 — authorised users only.\n// Replace with your own numeric Telegram user ID(s).\nconst ALLOWED = [111111111]; // <-- your Telegram user ID\nconst ALLOWED_COMMANDS = ['/task'];\n\nconst msg = $input.first().json.message || {};\nconst fromId = msg.from?.id;\nconst chatId = msg.chat?.id;\nconst text = (msg.text || '').trim();\n\nif (!fromId || !chatId) return [];\nif (!ALLOWED.includes(fromId)) {\n  return [{ json: { denied: true, chatId, reply: '🚫 This bot is private.' } }];\n}\n\nif (!text.startsWith('/task')) {\n  return [{ json: { denied: true, chatId, reply: 'Send /task <description> to plan work.' } }];\n}\n\nreturn [{ json: { allowed: true, chatId, request: text.replace(/^\\/task\\s*/i, '').trim() } }];"
+      },
+      "id": "a1000000-0000-4000-8000-000000000002",
+      "name": "Allow-list & parse",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-400, 0]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict", "version": 2 },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ $json.denied }}",
+              "rightValue": true,
+              "operator": { "type": "boolean", "operation": "notEquals" }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "a1000000-0000-4000-8000-000000000003",
+      "name": "Allowed?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [-180, 0]
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $json.chatId }}",
+        "text": "=🚫 {{ $json.reply }}",
+        "additionalFields": {}
+      },
+      "id": "a1000000-0000-4000-8000-000000000004",
+      "name": "Refuse",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [40, 200],
+      "credentials": {
+        "telegramApi": { "id": "REPLACE_TELEGRAM_CREDENTIAL", "name": "Telegram account" }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:11434/api/chat",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [{ "name": "content-type", "value": "application/json" }]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ model: 'llama3.2', stream: false, options: { temperature: 0.2 }, messages: [ { role: 'system', content: 'You are the AI Manager for a small digital office. Convert the user request into 1-5 clear, actionable tasks. Return ONLY valid JSON: {\"tasks\":[{\"task\":\"string\",\"priority\":\"High | Medium | Low\",\"owner\":\"You | Content Agent | Research Agent\",\"deadline\":\"YYYY-MM-DD or empty\",\"status\":\"Pending\",\"notes\":\"short context\"}]}. Rules: do not invent deadlines unless the user gives one; do not publish, message anyone, spend money or delete data; keep each task specific and measurable; if the request is unclear create one task: \"Clarify request with user\".' }, { role: 'user', content: $json.request } ] }) }}",
+        "options": { "timeout": 60000 }
+      },
+      "id": "a1000000-0000-4000-8000-000000000005",
+      "name": "AI Manager (Ollama)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [40, -60],
+      "notes": "Docker: http://host.docker.internal:11434 — n8n and Ollama on the same machine without Docker: http://localhost:11434. Change the model name to one you pulled."
+    },
+    {
+      "parameters": {
+        "jsCode": "// Chapter 4 validation rule.\nconst ALLOWED_PRIORITY = ['High', 'Medium', 'Low'];\nconst ALLOWED_OWNER = ['You', 'Content Agent', 'Research Agent'];\n\nconst raw = $input.first().json?.message?.content || '';\n\nfunction extractJson(text) {\n  const fenced = text.match(/```(?:json)?\\s*([\\s\\S]*?)```/i);\n  const body = fenced ? fenced[1] : text;\n  const start = body.search(/[[{]/);\n  if (start === -1) throw new Error('No JSON found');\n  const open = body[start];\n  const close = open === '{' ? '}' : ']';\n  let depth = 0, inString = false, escaped = false;\n  for (let i = start; i < body.length; i++) {\n    const ch = body[i];\n    if (inString) {\n      if (escaped) escaped = false;\n      else if (ch === '\\\\') escaped = true;\n      else if (ch === '\"') inString = false;\n      continue;\n    }\n    if (ch === '\"') inString = true;\n    else if (ch === open) depth++;\n    else if (ch === close && --depth === 0) return JSON.parse(body.slice(start, i + 1));\n  }\n  throw new Error('Incomplete JSON');\n}\n\nlet tasks = [];\nlet needsReview = false;\ntry {\n  const payload = extractJson(raw);\n  tasks = (payload.tasks || []).slice(0, 5).map((t) => ({\n    task: String(t.task || '').trim(),\n    priority: ALLOWED_PRIORITY.includes(t.priority) ? t.priority : 'Medium',\n    owner: ALLOWED_OWNER.includes(t.owner) ? t.owner : 'You',\n    deadline: /^\\d{4}-\\d{2}-\\d{2}$/.test(String(t.deadline || '')) ? t.deadline : '',\n    status: 'Pending',\n    notes: String(t.notes || '').slice(0, 300),\n  })).filter((t) => t.task);\n  if (!tasks.length) needsReview = true;\n} catch (e) {\n  needsReview = true;\n}\n\nif (!tasks.length) {\n  tasks = [{\n    task: 'Clarify request with user',\n    priority: 'Medium',\n    owner: 'You',\n    deadline: '',\n    status: 'Pending',\n    notes: 'AI output was not valid JSON — needs review',\n  }];\n}\n\nconst chatId = $('Allow-list & parse').first().json.chatId;\nconst request = $('Allow-list & parse').first().json.request;\nconst stamp = new Date().toISOString();\n\nreturn tasks.map((t, index) => ({\n  json: {\n    'Task ID': 'T-' + stamp.slice(0, 10).replace(/-/g, '') + '-' + String(index + 1).padStart(2, '0'),\n    'Created At': stamp.slice(0, 16).replace('T', ' '),\n    Request: request,\n    Task: t.task,\n    Priority: t.priority,\n    Owner: t.owner,\n    Deadline: t.deadline,\n    Status: t.status,\n    Notes: t.notes,\n    chatId,\n    needsReview,\n  },\n}));"
+      },
+      "id": "a1000000-0000-4000-8000-000000000006",
+      "name": "Validate JSON",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [280, -60]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_SPREADSHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Tasks",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Task ID": "={{ $json['Task ID'] }}",
+            "Created At": "={{ $json['Created At'] }}",
+            "Request": "={{ $json.Request }}",
+            "Task": "={{ $json.Task }}",
+            "Priority": "={{ $json.Priority }}",
+            "Owner": "={{ $json.Owner }}",
+            "Deadline": "={{ $json.Deadline }}",
+            "Status": "={{ $json.Status }}",
+            "Notes": "={{ $json.Notes }}"
+          },
+          "matchingColumns": [],
+          "schema": []
+        },
+        "options": {}
+      },
+      "id": "a1000000-0000-4000-8000-000000000007",
+      "name": "Append Tasks",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [520, -60],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "REPLACE_GOOGLE_CREDENTIAL",
+          "name": "Google Sheets account"
+        }
+      },
+      "notes": "Set the spreadsheet ID and confirm the Tasks tab columns after import."
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Allow-list & parse').first().json.chatId }}",
+        "text": "=✅ Task received. {{ $items('Validate JSON').length }} task(s) saved to the Tasks tab.\n\n{{ $items('Validate JSON').map(i => '• ' + i.json.Task + ' (' + i.json.Priority + ', ' + i.json.Owner + ')').join('\\n') }}\n\nNothing will be published without your approval.",
+        "additionalFields": {}
+      },
+      "id": "a1000000-0000-4000-8000-000000000008",
+      "name": "Telegram confirmation",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [760, -60],
+      "credentials": {
+        "telegramApi": { "id": "REPLACE_TELEGRAM_CREDENTIAL", "name": "Telegram account" }
+      }
+    }
+  ],
+  "connections": {
+    "Telegram Trigger": {
+      "main": [[{ "node": "Allow-list & parse", "type": "main", "index": 0 }]]
+    },
+    "Allow-list & parse": {
+      "main": [[{ "node": "Allowed?", "type": "main", "index": 0 }]]
+    },
+    "Allowed?": {
+      "main": [
+        [{ "node": "AI Manager (Ollama)", "type": "main", "index": 0 }],
+        [{ "node": "Refuse", "type": "main", "index": 0 }]
+      ]
+    },
+    "AI Manager (Ollama)": {
+      "main": [[{ "node": "Validate JSON", "type": "main", "index": 0 }]]
+    },
+    "Validate JSON": {
+      "main": [[{ "node": "Append Tasks", "type": "main", "index": 0 }]]
+    },
+    "Append Tasks": {
+      "main": [[{ "node": "Telegram confirmation", "type": "main", "index": 0 }]]
+    }
+  },
+  "active": false,
+  "settings": { "executionOrder": "v1" },
+  "pinData": {},
+  "meta": { "templateCredsSetupCompleted": false },
+  "tags": []
+}
