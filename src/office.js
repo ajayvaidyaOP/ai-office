@@ -399,16 +399,18 @@ export async function decideDraft({ id, decision, feedback = '' }, actor = 'owne
   return { draft, revision };
 }
 
-export async function addLeads({ niche = 'unspecified', location = '', sourceUrl = '', notes = '' }, actor = 'owner') {
+export async function addLeads({ niche = 'unspecified', location = '', sourceUrl = '', notes = '', businessName = '' }, actor = 'owner') {
   const result = await runResearch({ niche, location, sourceUrl, notes });
   if (!result.ok) return { ok: false, reason: result.reason || 'A public source URL and your own notes are required.' };
 
-  const leads = result.leads.map((lead) => {
+  const leads = result.leads.map((lead, index) => {
+    // If the human typed the name themselves, that beats anything derived from notes.
+    const name = (index === 0 && businessName ? businessName : lead.businessName) || lead.businessName;
     const scored = scoreLead({ ...lead, location, stage: 'New' });
     const row = {
       id: store.nextId('lead'),
       createdAt: new Date().toISOString(),
-      businessName: lead.businessName,
+      businessName: name,
       website: lead.website,
       niche: lead.niche || niche,
       location,
@@ -560,14 +562,29 @@ export function setLeadStage(id, stage, actor = 'owner') {
   const target = LEAD_STAGES.find((item) => item.toLowerCase() === String(stage || '').toLowerCase());
   if (!target) throw new Error(`Stage must be one of: ${LEAD_STAGES.join(', ')}`);
   lead.stage = target;
+  /*
+   * Moving to Contacted/Replied means a message went out. Before this, the stage
+   * changed but no send date was recorded, so the follow-up engine had no start
+   * point and /followups stayed empty while the lead obviously needed chasing.
+   */
+  let stamped = false;
+  if (['Contacted', 'Replied'].includes(target) && !lead.sentAt) {
+    lead.sentAt = new Date().toISOString();
+    lead.contactStatus = 'Contacted';
+    stamped = true;
+  }
   if (target !== 'New') lead.lastTouchAt = new Date().toISOString();
   if (target === 'Won') lead.contactStatus = 'Client';
   const scored = scoreLead(lead);
   lead.score = scored.score;
   lead.scoreReasons = scored.reasons;
   store.save();
-  store.audit('lead.stage', { actor, ref: lead.id, detail: `${target} — ${lead.businessName}` });
-  return { lead };
+  store.audit('lead.stage', {
+    actor,
+    ref: lead.id,
+    detail: `${target} — ${lead.businessName}${stamped ? ' · follow-up clock started' : ''}`,
+  });
+  return { lead, stamped };
 }
 
 export function addClient(data = {}, actor = 'owner') {
@@ -620,7 +637,13 @@ export function promoteLead(id, actor = 'owner') {
     actor,
   );
   lead.clientId = client.id;
+  /*
+   * Promoting is a data move, not a sale. Marking the lead Won used to inflate
+   * the pipeline's win rate and won-value the moment you created the client
+   * record. The deal is won when the CLIENT stage says so.
+   */
   lead.stage = 'Won';
+  lead.stageReason = 'promoted to client record — deal value lives on the client';
   lead.contactStatus = 'Client';
   lead.nextFollowUp = null;
   store.save();
@@ -655,6 +678,24 @@ export async function auditOneLead(id, actor = 'owner', { respectVerification = 
   if (!lead) throw new Error(`Lead ${id} not found.`);
 
   const result = await auditLead(lead);
+
+  /*
+   * A fetch that never reached the site is not an audit. Storing it would put a
+   * fake "high severity" badge on the row and, before v2.3, inflate its score.
+   * We keep it in the return value so the caller can explain what happened, but
+   * the lead is left with only the audit it actually earned.
+   */
+  const reached = result.reachable === true || result.checks?.fetched === true;
+  if (!reached) {
+    store.audit('lead.audit_skipped', {
+      actor,
+      ref: lead.id,
+      detail: `could not reach ${result.url || lead.website || lead.sourceUrl} — nothing stored`,
+      level: 'warn',
+    });
+    return { lead, audit: result, skipped: true, reason: result.findings?.[0]?.evidence || 'the page did not open' };
+  }
+
   lead.audit = {
     ...result,
     by: actor,
@@ -712,17 +753,40 @@ export async function auditLeads({ ids = [], limit = 5, onlyUnverified = false }
   });
   const picked = pool.slice(0, max);
   const rows = [];
+  let skipped = 0;
   for (const lead of picked) {
     try {
-      const { audit } = await auditOneLead(lead.id, actor);
-      rows.push({ id: lead.id, businessName: lead.businessName, severity: audit.severity, findings: audit.findings.length });
+      const result = await auditOneLead(lead.id, actor);
+      if (result.skipped) {
+        // Not an audit. Reporting it as one is how 25 leads once tied at 74.
+        skipped += 1;
+        rows.push({
+          id: lead.id,
+          businessName: lead.businessName,
+          error: `could not open the page (${result.reason}) — nothing saved`,
+        });
+      } else {
+        rows.push({
+          id: lead.id,
+          businessName: lead.businessName,
+          severity: result.audit.severity,
+          findings: result.audit.findings.length,
+        });
+      }
       // Be a good citizen: small gap between external requests.
       await new Promise((resolve) => setTimeout(resolve, 250));
     } catch (error) {
+      skipped += 1;
       rows.push({ id: lead.id, businessName: lead.businessName, error: error.message });
     }
   }
-  return { ok: true, audited: rows.length, remaining: Math.max(0, pool.length - picked.length), rows };
+  return {
+    ok: true,
+    audited: rows.length - skipped,
+    skipped,
+    remaining: Math.max(0, pool.length - picked.length),
+    rows,
+  };
 }
 
 /* ═══════════════════════════════════════════════════════════════
@@ -1310,14 +1374,40 @@ async function commandLead(rest, actor) {
     });
   }
 
-  const parts = rest.split('|').map((part) => part.trim());
+  const parts = rest.split('|').map((part) => part.trim()).filter(Boolean);
   const urlPart = parts.find((part) => /^https?:\/\//i.test(part)) || (text.match(/https?:\/\/\S+/) || [])[0] || '';
   const withoutUrl = parts.filter((part) => part !== urlPart);
-  const niche = withoutUrl[0] || 'unspecified';
-  const location = withoutUrl[1] || '';
-  const notes = withoutUrl.slice(2).join('\n');
 
-  const result = await addLeads({ niche, location, sourceUrl: urlPart, notes }, actor);
+  /**
+   * Slots are positional, and people naturally type the business first:
+   *   /lead Cakecstacy | bakery | Pune | https://… | Instagram active, no order page
+   * So: if the FIRST slot is not a niche we recognise and a later slot looks like
+   * one, treat slot 1 as the business name. Everything after the source URL is
+   * notes. When in doubt we keep the old reading — a wrong name is worse than a
+   * generic niche.
+   */
+  const NICHES = /^(cafe|café|bakery|restaurant|salon|gym|clinic|dentist|spa|studio|boutique|interior|photograph|school|academy|hotel|retail|shop|store|brand|agency|fitness|yoga|pet|grooming|cloud kitchen|d2c|jewell?ery|tailor|coaching|tuition)/i;
+  let businessName = '';
+  let niche = withoutUrl[0] || 'unspecified';
+  let location = withoutUrl[1] || '';
+  let notes = withoutUrl.slice(2).join('\n');
+
+  const looksLikeNiche = (value = '') => NICHES.test(value.trim());
+  if (!looksLikeNiche(niche)) {
+    const nicheIndex = withoutUrl.findIndex((part, index) => index > 0 && looksLikeNiche(part));
+    if (nicheIndex > 0) {
+      businessName = withoutUrl[0];
+      niche = withoutUrl[nicheIndex];
+      location = withoutUrl[nicheIndex + 1] && !/^\d/.test(withoutUrl[nicheIndex + 1]) ? withoutUrl[nicheIndex + 1] : location;
+      notes = withoutUrl.slice(nicheIndex + 2).join('\n');
+    }
+  }
+  // A trailing slot that is really the first lead's name helps the agent, nothing else.
+  if (businessName && notes && !notes.startsWith(businessName)) {
+    notes = notes;
+  }
+
+  const result = await addLeads({ niche, location, sourceUrl: urlPart, notes, businessName }, actor);
   if (!result.ok) {
     return reply({
       text: [
@@ -1401,8 +1491,16 @@ async function commandStage(rest, actor) {
       const { client } = setClientStage(id, stage, actor);
       return reply({ text: `🔄 ${client.id} · ${client.company} → ${client.stage}\nDeal value: ${money(client.value)}` });
     }
-    const { lead } = setLeadStage(id, stage, actor);
-    return reply({ text: `🔄 ${lead.id} · ${lead.businessName} → ${lead.stage} (score ${lead.score})` });
+    const { lead, stamped } = setLeadStage(id, stage, actor);
+    const lines = [`🔄 ${lead.id} · ${lead.businessName} → ${lead.stage} (score ${lead.score})`];
+    if (stamped) {
+      lines.push(
+        '',
+        `Follow-up clock started today. Day ${config.followUp.first} reminder lands on ${addDays(lead.sentAt, config.followUp.first)}.`,
+        'If you already sent it, all good — this is only the reminder.',
+      );
+    }
+    return reply({ text: lines.join('\n') });
   } catch (error) {
     return reply({ text: error.message });
   }
@@ -1412,7 +1510,19 @@ async function commandAudit(rest, actor) {
   const ids = extractIds(rest, 'lead');
   if (!ids.length) return reply({ text: 'Usage: /audit L-0007 — I open the page and report only what is actually there.' });
   try {
-    const { lead, audit } = await auditOneLead(ids[0], actor);
+    const { lead, audit, skipped, reason } = await auditOneLead(ids[0], actor);
+    if (skipped) {
+      return reply({
+        text: [
+          `📵 COULD NOT AUDIT — ${lead.businessName} (${lead.id})`,
+          `Tried: ${audit.url || lead.website || lead.sourceUrl || 'no URL on file'}`,
+          `Why: ${reason}`,
+          '',
+          'Nothing was saved. A page that did not open is not evidence about the business.',
+          'Run this again on a machine with internet.',
+        ].join('\n'),
+      });
+    }
     const lines = [
       `🔎 AUDIT — ${lead.businessName} (${lead.id})`,
       `Page: ${audit.finalUrl || audit.url || 'no website on file'}`,
@@ -1477,12 +1587,29 @@ async function commandAuditAll(rest, actor) {
   const limit = Number((rest.match(/\d+/) || [5])[0]) || 5;
   try {
     const result = await auditLeads({ limit, onlyUnverified: true }, actor);
-    if (!result.audited) return reply({ text: 'Nothing to audit. Every active lead already has an audit.' });
-    const lines = [`🔎 AUDITED ${result.audited} LEAD${result.audited === 1 ? '' : 'S'}${result.remaining ? ` · ${result.remaining} still waiting` : ''}`, ''];
+    const lines = [];
+    if (result.audited) {
+      lines.push(`🔎 AUDITED ${result.audited} LEAD${result.audited === 1 ? '' : 'S'}${result.remaining ? ` · ${result.remaining} still waiting` : ''}`, '');
+    } else {
+      lines.push('📵 NO LEAD COULD BE AUDITED', '');
+    }
     result.rows.forEach((row) => {
-      lines.push(row.error ? `• ${row.id} ${row.businessName} — could not check: ${row.error}` : `• ${row.id} ${row.businessName} — ${row.severity} · ${row.findings} finding(s)`);
+      lines.push(
+        row.error
+          ? `• ${row.id} ${row.businessName} — skipped: ${row.error}`
+          : `• ${row.id} ${row.businessName} — ${row.severity} · ${row.findings} finding(s)`,
+      );
     });
-    lines.push('', 'Evidence only. A human still verifies each row before anything is sent.');
+    if (result.skipped && !result.audited) {
+      lines.push(
+        '',
+        `All ${result.skipped} page${result.skipped === 1 ? '' : 's'} failed to open, so nothing was saved.`,
+        'That is a network problem on this machine, not a finding about the business.',
+        'Run /audit-all again where the internet works.',
+      );
+    } else {
+      lines.push('', 'Evidence only. A human still verifies each row before anything is sent.');
+    }
     return reply({ text: lines.join('\n') });
   } catch (error) {
     return reply({ text: error.message });
@@ -1552,7 +1679,40 @@ async function commandOutreach(rest, actor) {
 async function commandProposal(rest, actor) {
   const parts = normalise(rest).split(/\s+/);
   const id = (parts[0] || '').toUpperCase();
-  if (!id.startsWith('C-')) return reply({ text: 'Usage: /proposal C-0001 — drafts a proposal for a client record.' });
+
+  /*
+   * People type the lead they are working on, not the client record number.
+   * A lead cannot hold a proposal — it has to be a client first — so we say that
+   * instead of printing usage text at them.
+   */
+  if (id.startsWith('L-')) {
+    const lead = store.db.leads.find((row) => row.id === id);
+    if (!lead) return reply({ text: `${id} does not exist.` });
+    const client = (store.db.clients || []).find(
+      (row) => row.leadId === lead.id || row.id === lead.clientId || row.company === lead.businessName,
+    );
+    if (!client) {
+      return reply({
+        text: [
+          `${id} is still a lead, not a client — a proposal needs a client record.`,
+          '',
+          `Run /promote ${id} first, then /proposal C-XXXX.`,
+        ].join('\n'),
+        buttons: [{ label: 'Promote to client', command: `/promote ${lead.id}`, tone: 'good' }],
+      });
+    }
+    const result = await createProposal(client.id, actor);
+    return reply({ text: approvalMessage(result.draft), buttons: draftButtons(result.draft), ref: result.draft.id });
+  }
+
+  if (!id.startsWith('C-')) {
+    return reply({
+      text: [
+        'Usage: /proposal C-0001 — drafts a proposal for a client record.',
+        'Working from a lead? /proposal L-0007 works too once that lead is promoted.',
+      ].join('\n'),
+    });
+  }
   try {
     const result = await createProposal(id, actor);
     return reply({ text: approvalMessage(result.draft), buttons: draftButtons(result.draft), ref: result.draft.id });

@@ -347,7 +347,7 @@ function renderDashboard() {
   };
   $('#mission-list').innerHTML = data.mission.length
     ? data.mission
-        .slice(0, 6)
+        .slice(0, 8)
         .map((item) => {
           const [tone, soft] = missionTones[item.kind] || missionTones.task;
           return `<div class="mission-item" data-mission="${esc(item.kind)}" data-ref="${esc(item.ref)}">
@@ -376,53 +376,16 @@ function renderDashboard() {
     <span>Avg deal <b>${inr(o.pipeline.avgDeal)}</b></span>
     <span>Target <b>${inr(o.pipeline.target)}/mo</b></span>`;
 
-  const waiting = (state.drafts || []).filter((draft) => draft.status === 'Awaiting approval').slice(0, 4);
-  $('#approval-mini').innerHTML = waiting.length
-    ? waiting
-        .map(
-          (draft) => `<div class="approval-line">
-            <span class="agent-dot">${esc(initials(kindLabel(draft.kind)))}</span>
-            <span class="a-main"><b>${esc(draft.title || draft.request)}</b><small>${esc(draft.id)} · ${esc(draft.platform)} · ${esc(kindLabel(draft.kind))}</small></span>
-            <span class="a-actions">
-              <button class="mini-act good" data-approve="${esc(draft.id)}" title="Approve">${icon('check')}</button>
-              <button class="mini-act" data-open-approval="${esc(draft.id)}" title="Review">${icon('arrow-right')}</button>
-            </span>
-          </div>`,
-        )
-        .join('')
-    : emptyState('Inbox zero', 'Every draft has a decision.');
-
   renderActivityChart();
 
-  const followUps = [...(data.overview.followUps.list || [])];
-  $('#dash-followup-list').innerHTML = followUps.length
-    ? followUps
-        .slice(0, 5)
-        .map(
-          (row) => `<div class="list-row">
-            <span class="agent-dot">${esc(initials(row.name))}</span>
-            <span class="l-main"><b>${esc(row.name)}</b><small>${esc(row.id)} · ${row.kind === 'client' ? 'client' : 'lead'}</small></span>
-            <time>${esc(dueLabel(row.date))}</time>
-          </div>`,
-        )
-        .join('')
-    : emptyState('No follow-ups due', 'Schedule one from a client card.');
-
-  const agents = (state.agents || []).slice(0, 8);
-  $('#agent-grid').innerHTML = agents
-    .map((agent) => {
-      const stats = data.agents.find((row) => row.agent === agent.id) || { runs: 0, okRate: 100 };
-      return `<div class="agent-card" title="${esc(agent.responsibility)}">
-        <span class="agent-dot">${esc(initials(agent.name))}</span>
-        <span class="ag-main"><b>${esc(agent.name)}</b><small>${stats.runs} runs · ${stats.okRate}% ok</small></span>
-      </div>`;
-    })
-    .join('');
+  const missionRows = data.mission || [];
+  $('#mission-count').textContent = `${missionRows.length} item${missionRows.length === 1 ? '' : 's'}`;
 }
 
 function renderActivityChart() {
   const series = ui.state?.dashboard?.activity || [];
   const chart = $('#activity-chart');
+  if (!chart) return;
   if (!series.length) {
     chart.innerHTML = emptyState('No activity yet');
     return;
@@ -739,6 +702,19 @@ function showFinderPane(pane) {
   $('#content').scrollTop = 0;
 }
 
+/** Open the approval list, then scroll to and flash the draft the user came for. */
+function revealApproval(draftId) {
+  ui.filters.approvals = 'Awaiting approval';
+  renderApprovals();
+  requestAnimationFrame(() => {
+    const row = document.querySelector(`[data-draft-card="${draftId}"]`);
+    if (!row) return;
+    row.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    row.classList.add('is-flash');
+    setTimeout(() => row.classList.remove('is-flash'), 1600);
+  });
+}
+
 function renderTeam() {
   const state = ui.state;
   if (!state) return;
@@ -763,7 +739,8 @@ function renderTeam() {
     return;
   }
 
-  $('#team-grid').innerHTML = rows
+  // One line per agent; the detail lives in the expandable row.
+  $('#team-grid').innerHTML = `<div class="team-table">${rows
     .map((row) => {
       const tone = RESULT_TONE[row.lastResult] || RESULT_TONE.never;
       const accent = TEAM_ACCENT[row.id] || '#8b5cf6';
@@ -773,28 +750,32 @@ function renderTeam() {
       const waiting = row.waiting.length
         ? row.waiting.map((line) => `<li><svg class="ic" style="color:#fbbf24"><use href="#i-alert" /></svg>${esc(line)}</li>`).join('')
         : '';
-      return `<article class="team-card" style="--accent:${accent}">
-        <header>
-          <span class="agent-dot" style="background:${accent}22;color:${accent}">${esc(initials(row.name))}</span>
-          <div class="tm-title"><b>${esc(row.name)}</b><small>${esc(row.humanControl)}</small></div>
-          <span class="tm-state" style="color:${tone.color}"><span class="dot" style="background:${tone.color}"></span>${esc(tone.label)}</span>
-        </header>
-        <p class="tm-job">${esc(row.responsibility)}</p>
-        <div class="tm-stats">
-          <span><b>${row.runs}</b> run${row.runs === 1 ? '' : 's'}</span>
-          <span><b>${row.okRate === null ? '—' : `${row.okRate}%`}</b> ok</span>
-          <span><b>${row.finished}</b> finished</span>
-          <span>${esc(row.idle)}</span>
-        </div>
-        <div class="tm-block"><span class="tm-label">Doing now</span><ul>${doing}</ul></div>
-        ${waiting ? `<div class="tm-block tm-wait"><span class="tm-label">Waiting on you</span><ul>${waiting}</ul></div>` : ''}
-        <footer>
-          <span class="mono xs">${esc(row.provider)}</span>
-          <button class="link-btn" data-command="/brief">brief<svg class="ic"><use href="#i-chevron" /></svg></button>
-        </footer>
-      </article>`;
+      return `<div class="team-row" style="--accent:${accent}">
+        <details>
+          <summary>
+            <span class="tr-dot" style="background:${tone.color}" title="${esc(tone.label)}"></span>
+            <span class="tr-name"><b>${esc(row.name)}</b><small>${esc(row.idle)}</small></span>
+            <span class="tr-doing">${row.doing.length ? esc(row.doing.slice(0, 2).join(' · ')) : 'nothing in hand'}</span>
+            <span class="tr-hold">${row.waiting.length ? `${icon('alert')}${row.waiting.length}` : ''}</span>
+            <span class="tr-rate">${row.okRate === null ? '—' : `${row.okRate}%`}</span>
+            ${icon('chevron')}
+          </summary>
+          <div class="tr-body">
+            <p class="tm-job">${esc(row.responsibility)}</p>
+            <div class="tm-stats">
+              <span><b>${row.runs}</b> runs</span>
+              <span><b>${row.finished}</b> finished</span>
+              <span>engine <b>${esc(row.provider)}</b></span>
+              <span>result <b style="color:${tone.color}">${esc(tone.label)}</b></span>
+            </div>
+            <div class="tm-block"><span class="tm-label">Doing now</span><ul>${doing}</ul></div>
+            ${waiting ? `<div class="tm-block tm-wait"><span class="tm-label">Waiting on you</span><ul>${waiting}</ul></div>` : ''}
+            <p class="hint">${esc(row.humanControl)}</p>
+          </div>
+        </details>
+      </div>`;
     })
-    .join('');
+    .join('')}</div>`;
 
   const held = [];
   for (const draft of (state.drafts || []).filter((d) => d.status === 'Awaiting approval')) {
@@ -2333,7 +2314,12 @@ function bindGlobal() {
   $('#hero-brief').addEventListener('click', () => generateBrief());
   $('#mini-brief-refresh').addEventListener('click', () => generateBrief());
   $('#btn-brief-top').addEventListener('click', () => generateBrief());
-  $('#hero-approve').addEventListener('click', () => setView('approvals'));
+  $('#hero-approve').addEventListener('click', () => {
+    // Go where the work actually is. Approvals win; otherwise the queue order decides.
+    const first = (ui.state?.dashboard?.mission || [])[0];
+    const map = { approval: 'approvals', task: 'work', followup: 'calendar', verify: 'finder' };
+    setView(map[first?.kind] || 'approvals');
+  });
 
   const composer = $('#composer-input');
   const form = $('#composer-form');
@@ -2425,8 +2411,11 @@ function bindGlobal() {
       }
       if (card?.dataset.mission) {
         const kind = card.dataset.mission;
-        if (kind === 'approval') setView('approvals');
-        else if (kind === 'verify') setView('finder');
+        const ref = card.dataset.ref || '';
+        if (kind === 'approval') {
+          setView('approvals');
+          if (ref) revealApproval(ref);
+        } else if (kind === 'verify') setView('finder');
         else if (kind === 'followup') setView('calendar');
         else setView('work');
       }

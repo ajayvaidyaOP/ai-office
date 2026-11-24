@@ -137,3 +137,53 @@ live store      → 25 leads · 0 audited · 4 clients · 6 tasks · 5 drafts
 | SQLite | still `data/db.json`. Fine for one user, not for two. |
 | Real user roles | `actor` is a label, not a login. The access code is one shared password. |
 | Auto-send to clients | refused on purpose. The approval gate is the product. |
+
+---
+
+# v2.3.1 — clutter pass
+
+Your words: *"bahot hi kich kich lgra hai"*. Fair. Here is exactly what was on screen
+before, and what is on screen now.
+
+## Panels visible before you click anything
+
+| Page | v2.3 | v2.3.1 | What changed |
+|---|---|---|---|
+| Dashboard | 6 panels | **1 + fold** | approvals, follow-ups and the agent list were three boxes saying the same thing as the task list. One ranked list now, rest folded. |
+| Setup | 5 panels | **1 + fold** | "Is this office ready?" is what you open it for. Everything you touch once moved into a fold. |
+| Calendar | 3 panels | **1 + fold** | the agenda includes overdue; the two side lists are detail now. |
+| My Team | 8 cards | **8 rows** | eight equal cards was a wall. Same facts as a list you scan in one pass; click a row for detail. |
+| Client Finder | 5 panels | **2 per step** | already tabbed in v2.3, now with per-pane counting enforced by the self-check. |
+
+## Sidebar
+
+12 flat items → 12 items in **4 named groups**: *Do the work · Find clients · Know what is
+happening · Set up once*. The duplicate Setup/Guide links at the bottom were removed
+(they were in the nav already). On a phone the bottom bar now shows the six used daily
+instead of squeezing twelve.
+
+## Two behaviour fixes hiding in the noise
+
+- **"Clear my queue"** always jumped to Approvals, even when the top item was an overdue
+  task or a lead needing verification. It now reads the top of the ranked list and goes
+  where the work actually is.
+- Clicking an approval on the dashboard used to open the Approvals tab and leave you to
+  find the draft. It now scrolls to that exact draft and flashes it.
+
+## A guard so it cannot creep back
+
+Four new self-check assertions, so the next feature cannot quietly add a sixth panel:
+
+```
+✅ No page opens with more than three panels
+✅ No page shows more than eight buttons at once
+✅ Sidebar stays at a readable size                    12 items in 4 groups
+✅ The dashboard no longer repeats the same data in three boxes
+
+38/38 checks passed
+```
+
+The density check counts **per pane** on tabbed pages, so Client Finder is measured by
+its busiest single step, not the sum of all four.
+
+`npm test` 23/23 · `npm run check` 38/38.

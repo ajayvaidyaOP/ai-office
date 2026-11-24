@@ -10,7 +10,7 @@ export const BRAND = {
   short: 'Invincible',
   workspace: 'Invincible HQ',
   tagline: 'Plan the week, find the clients, draft the work — you approve everything.',
-  version: '2.3.0',
+  version: '2.3.2',
 };
 
 /** Tiny .env loader — no dependencies, never overrides real environment values. */

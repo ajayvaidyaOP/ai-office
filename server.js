@@ -87,6 +87,9 @@ function authorised(req) {
 }
 
 export const statePayload = () => {
+  // A backup runs in another process; pick up its timestamp so the checklist is
+  // honest instead of stuck on "No backup yet".
+  store.reloadMeta();
   const db = store.snapshot();
   return {
     brand: BRAND,

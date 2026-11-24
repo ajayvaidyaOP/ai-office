@@ -1,6 +1,6 @@
 {
   "name": "ai-invincible-office",
-  "version": "2.3.0",
+  "version": "2.3.2",
   "private": true,
   "type": "module",
   "description": "AI Invincible Office \u2014 your own AI back office: lead finder, website auditor, approvals, follow-ups, daily brief.",
@@ -12,8 +12,9 @@
     "dev": "node --watch server.js",
     "check": "node scripts/check.mjs",
     "backup": "node scripts/backup.mjs",
-    "test": "node --test \"test/*.test.mjs\"",
-    "test:watch": "node --test --watch \"test/*.test.mjs\""
+    "test": "node --test \"test/*.test.mjs\" \"test/ui-smoke.mjs\"",
+    "test:watch": "node --test --watch \"test/*.test.mjs\"",
+    "test:ui": "node --test test/ui-smoke.mjs"
   },
   "keywords": [
     "ai",

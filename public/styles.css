@@ -203,21 +203,13 @@ button, input, select, textarea { font: inherit; color: inherit; }
   100% { box-shadow: 0 0 0 0 rgba(163, 230, 53, 0); }
 }
 
-.foot-links { display: flex; gap: 4px; }
-.foot-link {
-  flex: 1;
-  display: flex; align-items: center; justify-content: center; gap: 6px;
-  padding: 7px 8px;
-  border: 1px solid transparent;
-  border-radius: 9px;
-  background: none;
-  color: var(--text-3);
-  font-size: 11.5px;
-  cursor: pointer;
-  transition: all 0.15s;
+.nav-group {
+  margin: 14px 0 5px; padding: 0 11px;
+  font-size: 9px; font-weight: 700; letter-spacing: 0.09em; text-transform: uppercase;
+  color: var(--text-3); opacity: 0.8;
 }
-.foot-link .ic { width: 14px; height: 14px; }
-.foot-link:hover { color: var(--text); background: rgba(255, 255, 255, 0.05); }
+.nav-group:first-child { margin-top: 2px; }
+.nav-group-last { margin-top: 18px; }
 
 /* ── shell / topbar ─────────────────────────────────────────── */
 
@@ -1316,6 +1308,15 @@ code {
   }
   .brand, .sidebar-foot { display: none; }
   .nav { flex-direction: row; gap: 0; width: 100%; }
+  /* 12 items cannot fit a phone bottom bar — show the six used daily */
+  .nav-group { display: none; }
+  .nav .nav-item[data-view="guide"],
+  .nav .nav-item[data-view="reports"],
+  .nav .nav-item[data-view="audit"],
+  .nav .nav-item[data-view="console"],
+  .nav .nav-item[data-view="calendar"],
+  .nav .nav-item[data-view="setup"] { display: none; }
+  .nav .nav-item { min-width: 0; }
   .nav-item {
     flex-direction: column; gap: 3px;
     padding: 6px 4px;
@@ -1695,3 +1696,64 @@ code {
 .help-steps li span { color: var(--text-2); }
 .help-avoid { margin: 10px 0 0; font-size: 11px; color: #fcd34d; line-height: 1.5; }
 .help-avoid b { color: #fbbf24; }
+
+/* ── fold-away detail sheet (v2.3.1) ────────────────────────── */
+.sheet { margin-top: 16px; border: 1px solid var(--line); border-radius: 14px; background: rgba(255,255,255,0.014); }
+.sheet > summary {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  padding: 12px 16px; cursor: pointer; list-style: none;
+  font-size: 11.5px; font-weight: 600; color: var(--text-2);
+  border-radius: 14px;
+}
+.sheet > summary::-webkit-details-marker { display: none; }
+.sheet > summary .ic { width: 14px; height: 14px; transition: transform 0.18s; color: var(--text-3); }
+.sheet[open] > summary { border-bottom: 1px solid var(--line); border-radius: 14px 14px 0 0; color: var(--text); }
+.sheet[open] > summary .ic { transform: rotate(180deg); }
+.sheet > summary:hover { background: rgba(255,255,255,0.025); }
+.sheet > :not(summary) { margin: 14px 16px; }
+.sheet > .grid-2 { margin: 0 0 14px; padding: 0 16px; }
+.sheet > .kpi-grid { margin-top: 14px; }
+
+/* target highlight when arriving from the dashboard */
+.is-flash { animation: targetflash 1.6s ease-out; }
+@keyframes targetflash {
+  0% { box-shadow: 0 0 0 2px rgba(167, 139, 250, 0.85); }
+  100% { box-shadow: 0 0 0 2px rgba(167, 139, 250, 0); }
+}
+
+/* ── setup: folded settings (v2.3.1) ────────────────────────── */
+.setup-advanced-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 14px; margin: 0 16px 16px; }
+.setup-advanced-grid .card { margin: 0; }
+#setup-advanced > .grid-2 { margin: 0; padding: 0 16px 16px; }
+
+/* ── team as a compact list (v2.3.1) ────────────────────────── */
+.team-table { display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: 14px; overflow: hidden; background: rgba(255,255,255,0.012); }
+.team-row { border-bottom: 1px solid var(--line); }
+.team-row:last-child { border-bottom: 0; }
+.team-row details > summary {
+  display: grid;
+  grid-template-columns: 8px minmax(150px, 1.1fr) minmax(0, 2fr) 34px 52px 16px;
+  align-items: center; gap: 12px;
+  padding: 11px 14px; cursor: pointer; list-style: none;
+  border-left: 2px solid var(--accent);
+}
+.team-row summary::-webkit-details-marker { display: none; }
+.team-row summary:hover { background: rgba(255,255,255,0.03); }
+.team-row details[open] > summary { background: rgba(255,255,255,0.035); }
+.tr-dot { width: 8px; height: 8px; border-radius: 50%; }
+.tr-name { min-width: 0; }
+.tr-name b { display: block; font-size: 12px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tr-name small { font-size: 10px; color: var(--text-3); }
+.tr-doing { font-size: 11px; color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tr-hold { display: inline-flex; align-items: center; justify-content: flex-end; gap: 3px; font-size: 10.5px; color: #fbbf24; }
+.tr-hold .ic { width: 12px; height: 12px; }
+.tr-rate { font-size: 11px; color: var(--text-3); text-align: right; }
+.tr-chev { width: 14px; height: 14px; color: var(--text-3); transition: transform 0.18s; }
+.team-row details[open] .tr-chev { transform: rotate(180deg); }
+.tr-body { padding: 0 14px 14px 34px; display: flex; flex-direction: column; gap: 9px; }
+
+@media (max-width: 860px) {
+  .team-row details > summary { grid-template-columns: 8px minmax(0,1fr) 34px 16px; }
+  .tr-doing, .tr-rate { display: none; }
+  .tr-body { padding-left: 14px; }
+}

@@ -259,6 +259,24 @@ class Store {
     return clone(this.db);
   }
 
+  /**
+   * Re-read the database from disk.
+   *
+   * `npm run backup` is a separate process: it stamps meta.lastBackupAt in its
+   * own copy of db.json, which this long-running server never sees. Without a
+   * reload the Setup checklist keeps saying "No backup yet" after a good backup.
+   * Only the filesystem-backed fields are refreshed, so in-flight work is safe.
+   */
+  reloadMeta() {
+    try {
+      const onDisk = JSON.parse(fs.readFileSync(DB_FILE, 'utf8'));
+      this.db.meta.lastBackupAt = onDisk.meta?.lastBackupAt ?? this.db.meta.lastBackupAt;
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   reset({ seed = false } = {}) {
     this.db = emptyDb();
     this.save();

@@ -67,16 +67,25 @@
         </div>
 
         <nav class="nav" id="nav" aria-label="Main">
-          <button class="nav-item is-active" data-view="dashboard"><svg class="ic"><use href="#i-grid" /></svg><span>Dashboard</span></button>
-          <button class="nav-item" data-view="console"><svg class="ic"><use href="#i-chat" /></svg><span>AI Console</span></button>
+          <p class="nav-group">Do the work</p>
+          <button class="nav-item is-active" data-view="dashboard"><svg class="ic"><use href="#i-grid" /></svg><span>Today</span></button>
           <button class="nav-item" data-view="approvals"><svg class="ic"><use href="#i-check-circle" /></svg><span>Approvals</span><em class="badge" id="badge-approvals" hidden>0</em></button>
           <button class="nav-item" data-view="work"><svg class="ic"><use href="#i-bolt" /></svg><span>Work</span><em class="count" id="count-work">0</em></button>
-          <button class="nav-item" data-view="team"><svg class="ic"><use href="#i-users" /></svg><span>My Team</span><em class="count" id="count-team">0</em></button>
-          <button class="nav-item" data-view="clients"><svg class="ic"><use href="#i-briefcase" /></svg><span>Clients</span><em class="count" id="count-clients">0</em></button>
+
+          <p class="nav-group">Find clients</p>
           <button class="nav-item" data-view="finder"><svg class="ic"><use href="#i-target" /></svg><span>Client Finder</span><em class="count" id="count-leads">0</em></button>
+          <button class="nav-item" data-view="clients"><svg class="ic"><use href="#i-briefcase" /></svg><span>Clients</span><em class="count" id="count-clients">0</em></button>
+
+          <p class="nav-group">Know what is happening</p>
+          <button class="nav-item" data-view="team"><svg class="ic"><use href="#i-users" /></svg><span>My Team</span><em class="count" id="count-team">0</em></button>
           <button class="nav-item" data-view="calendar"><svg class="ic"><use href="#i-calendar" /></svg><span>Calendar</span></button>
           <button class="nav-item" data-view="reports"><svg class="ic"><use href="#i-chart" /></svg><span>Reports</span></button>
           <button class="nav-item" data-view="audit"><svg class="ic"><use href="#i-shield" /></svg><span>Audit</span></button>
+
+          <p class="nav-group nav-group-last">Set up once</p>
+          <button class="nav-item" data-view="console"><svg class="ic"><use href="#i-chat" /></svg><span>AI Console</span></button>
+          <button class="nav-item" data-view="setup"><svg class="ic"><use href="#i-settings" /></svg><span>Setup</span></button>
+          <button class="nav-item" data-view="guide"><svg class="ic"><use href="#i-book" /></svg><span>Guide</span></button>
         </nav>
 
         <div class="sidebar-foot">
@@ -85,10 +94,7 @@
             <span class="engine-text"><b id="engine-label">offline engine</b><small id="engine-note">no model call needed</small></span>
             <svg class="ic"><use href="#i-chevron" /></svg>
           </button>
-          <div class="foot-links">
-            <button data-view="setup" class="foot-link"><svg class="ic"><use href="#i-settings" /></svg>Setup</button>
-            <button data-view="guide" class="foot-link"><svg class="ic"><use href="#i-book" /></svg>Guide</button>
-          </div>
+
         </div>
       </aside>
 
@@ -120,14 +126,15 @@
         <main class="content" id="content">
           <!-- ───── Dashboard ───── -->
           <section class="view is-active" data-view="dashboard">
+            <!-- 1. the only question that matters today -->
             <div class="hero">
               <div class="hero-copy">
                 <span class="eyebrow" id="hero-date">TODAY</span>
                 <h2 id="hero-greeting">Good evening, Founder.</h2>
-                <p id="hero-line">Two drafts are waiting on you. Clear them first — nothing ships without your approval.</p>
+                <p id="hero-line">Loading your queue…</p>
                 <div class="hero-actions">
-                  <button class="btn btn-primary" id="hero-brief" type="button"><svg class="ic"><use href="#i-sparkles" /></svg>Generate morning brief</button>
-                  <button class="btn btn-ghost" id="hero-approve" type="button">Review approvals<svg class="ic"><use href="#i-arrow-right" /></svg></button>
+                  <button class="btn btn-primary" id="hero-approve" type="button">Clear my queue<svg class="ic"><use href="#i-arrow-right" /></svg></button>
+                  <button class="btn btn-ghost" id="hero-brief" type="button"><svg class="ic"><use href="#i-sparkles" /></svg>Morning brief</button>
                 </div>
               </div>
               <div class="hero-score">
@@ -142,62 +149,44 @@
               </div>
             </div>
 
-            <div class="kpi-grid" id="kpi-grid"></div>
-
-            <div class="grid-2">
-              <div class="card panel">
-                <header class="panel-head">
-                  <div><h3>Focus today</h3><p>Ranked from your real data — approvals first.</p></div>
-                  <button class="link-btn" data-view="work">All work<svg class="ic"><use href="#i-chevron" /></svg></button>
-                </header>
-                <div class="mission" id="mission-list"></div>
-              </div>
-
-              <div class="card panel">
-                <header class="panel-head">
-                  <div><h3>Pipeline</h3><p>Open deals by stage.</p></div>
-                  <button class="link-btn" data-view="clients">Clients<svg class="ic"><use href="#i-chevron" /></svg></button>
-                </header>
-                <div class="funnel" id="funnel"></div>
-                <div class="funnel-foot" id="funnel-foot"></div>
-              </div>
+            <!-- 2. one flat, ranked list. not four boxes repeating each other -->
+            <div class="card panel">
+              <header class="panel-head">
+                <div><h3>Do these, in this order</h3><p>Approvals first, then overdue work, then follow-ups.</p></div>
+                <span class="tag" id="mission-count">0 items</span>
+              </header>
+              <div class="mission" id="mission-list"></div>
             </div>
 
-            <div class="grid-2">
-              <div class="card panel">
-                <header class="panel-head">
-                  <div><h3>Approval queue</h3><p>Nothing leaves this office without you.</p></div>
-                  <button class="link-btn" data-view="approvals">Open inbox<svg class="ic"><use href="#i-chevron" /></svg></button>
-                </header>
-                <div class="approval-mini" id="approval-mini"></div>
-              </div>
+            <!-- 3. everything else, folded away -->
+            <details class="sheet" id="dash-more">
+              <summary>
+                <span>Numbers, pipeline and team — only if you want them</span>
+                <svg class="ic"><use href="#i-chevron" /></svg>
+              </summary>
+              <div class="kpi-grid" id="kpi-grid"></div>
 
-              <div class="card panel">
-                <header class="panel-head">
-                  <div><h3>Activity</h3><p>Agent runs and drafts, last 14 days.</p></div>
-                  <span class="tag" id="activity-total">0 runs</span>
-                </header>
-                <div class="chart" id="activity-chart"></div>
-                <div class="chart-legend"><span class="dot dot-a"></span>agent runs <span class="dot dot-b"></span>drafts</div>
-              </div>
-            </div>
+              <div class="grid-2">
+                <div class="card panel">
+                  <header class="panel-head">
+                    <div><h3>Pipeline</h3><p>Open deals by stage.</p></div>
+                    <button class="link-btn" data-view="clients">Clients<svg class="ic"><use href="#i-chevron" /></svg></button>
+                  </header>
+                  <div class="funnel" id="funnel"></div>
+                  <div class="funnel-foot" id="funnel-foot"></div>
+                </div>
 
-            <div class="grid-2">
-              <div class="card panel">
-                <header class="panel-head">
-                  <div><h3>Next follow-ups</h3><p>Clients and leads that are due.</p></div>
-                  <button class="link-btn" data-view="calendar">Calendar<svg class="ic"><use href="#i-chevron" /></svg></button>
-                </header>
-                <div class="list" id="dash-followup-list"></div>
+                <div class="card panel">
+                  <header class="panel-head">
+                    <div><h3>Activity</h3><p>Agent runs and drafts, last 14 days.</p></div>
+                    <span class="tag" id="activity-total">0 runs</span>
+                  </header>
+                  <div class="chart" id="activity-chart"></div>
+                  <div class="chart-legend"><span class="dot dot-a"></span>agent runs <span class="dot dot-b"></span>drafts</div>
+                </div>
+                </div>
               </div>
-              <div class="card panel">
-                <header class="panel-head">
-                  <div><h3>Your AI team</h3><p>Eight agents, one approval rule.</p></div>
-                  <button class="link-btn" data-view="reports">Health<svg class="ic"><use href="#i-chevron" /></svg></button>
-                </header>
-                <div class="agent-grid" id="agent-grid"></div>
-              </div>
-            </div>
+            </details>
           </section>
 
           <!-- ───── Console ───── -->
@@ -278,7 +267,7 @@
           <!-- ───── My Team ───── -->
           <section class="view" data-view="team">
             <div class="team-head" id="team-head"></div>
-            <div class="team-grid" id="team-grid"></div>
+            <div id="team-grid"></div>
             <div class="card panel" style="margin-top:16px">
               <header class="panel-head">
                 <div><h3>What the team still needs from you</h3><p>Nothing moves downstream until you decide.</p></div>
@@ -414,12 +403,17 @@
 
           <!-- ───── Calendar ───── -->
           <section class="view" data-view="calendar">
-            <div class="grid-cal">
-              <div class="card panel">
-                <header class="panel-head"><div><h3>Next 21 days</h3><p>Deadlines, follow-ups and scheduled work.</p></div><span class="tag" id="cal-count">0 items</span></header>
-                <div class="agenda" id="agenda"></div>
-              </div>
-              <div class="panel-stack">
+            <div class="card panel">
+              <header class="panel-head">
+                <div><h3>Next 21 days</h3><p>Deadlines, follow-ups and approvals in one list. Overdue is marked, not hidden.</p></div>
+                <span class="tag" id="cal-count">0 items</span>
+              </header>
+              <div class="agenda" id="agenda"></div>
+            </div>
+
+            <details class="sheet" id="cal-more">
+              <summary><span>Overdue and approvals that are blocking others</span><svg class="ic"><use href="#i-chevron" /></svg></summary>
+              <div class="grid-2" style="margin-top:0">
                 <div class="card panel">
                   <header class="panel-head"><div><h3>Overdue</h3><p>Fix or reschedule — do not ignore.</p></div></header>
                   <div class="list" id="overdue-list"></div>
@@ -429,7 +423,7 @@
                   <div class="list" id="waiting-list"></div>
                 </div>
               </div>
-            </div>
+            </details>
           </section>
 
           <!-- ───── Reports ───── -->
@@ -444,6 +438,7 @@
                 <button class="btn btn-ghost btn-sm" id="btn-report" type="button"><svg class="ic"><use href="#i-refresh" /></svg>Generate report</button>
               </div>
             </div>
+            <p class="muted xs" style="margin:-4px 2px 12px">Looking for what each agent is doing right now? That lives in <button class="link-btn" data-view="team" style="display:inline-flex">My Team<svg class="ic"><use href="#i-chevron" /></svg></button></p>
             <div id="report-daily" class="report-pane is-active"></div>
             <div id="report-agents" class="report-pane"></div>
             <div id="report-usage" class="report-pane"></div>
@@ -459,57 +454,76 @@
 
           <!-- ───── Setup ───── -->
           <section class="view" data-view="setup">
-            <div class="setup-grid">
-              <div class="card panel">
-                <header class="panel-head"><div><h3>Office profile</h3><p>Shown across the dashboard and reports.</p></div></header>
-                <form id="profile-form" class="form">
-                  <div class="form-row">
-                    <label>Company / office name<input id="set-company" name="companyName" /></label>
-                    <label>Your name<input id="set-owner" name="ownerName" /></label>
-                  </div>
-                  <label>Monthly revenue target (₹)<input id="set-target" name="monthlyTarget" type="number" min="0" step="1000" /></label>
-                  <button class="btn btn-primary" type="submit">Save profile</button>
-                </form>
+            <!-- 1. the one thing you open this page for -->
+            <div class="card panel">
+              <header class="panel-head">
+                <div><h3>Is this office ready?</h3><p>Checked against real state, not a template.</p></div>
+                <button class="link-btn" data-view="guide">Full guide<svg class="ic"><use href="#i-chevron" /></svg></button>
+              </header>
+              <ul class="checklist" id="deploy-list">
+                <!-- Filled by renderDeployChecklist() from REAL state, not hardcoded. -->
+                <li class="muted">Checking…</li>
+              </ul>
+            </div>
+
+            <!-- 2. everything you touch once, folded -->
+            <details class="sheet" id="setup-advanced">
+              <summary><span>Profile, engine, channels, exports and data — set once, rarely touched</span><svg class="ic"><use href="#i-chevron" /></svg></summary>
+
+              <div class="setup-advanced-grid">
+                <div class="card panel">
+                  <header class="panel-head"><div><h3>Office profile</h3><p>Shown across the dashboard and reports.</p></div></header>
+                  <form id="profile-form" class="form">
+                    <div class="form-row">
+                      <label>Company / office name<input id="set-company" name="companyName" /></label>
+                      <label>Your name<input id="set-owner" name="ownerName" /></label>
+                    </div>
+                    <label>Monthly revenue target (₹)<input id="set-target" name="monthlyTarget" type="number" min="0" step="1000" /></label>
+                    <button class="btn btn-primary" type="submit">Save profile</button>
+                  </form>
+                </div>
+
+                <div class="card panel">
+                  <header class="panel-head"><div><h3>AI engine</h3><p>Ollama is free and private. Gemini is optional. Offline rules always work.</p></div></header>
+                  <form id="settings-form" class="form">
+                    <label>Provider
+                      <select id="set-provider">
+                        <option value="auto">auto — Ollama → Gemini → offline</option>
+                        <option value="ollama">ollama only</option>
+                        <option value="gemini">gemini only</option>
+                        <option value="offline">offline rules only</option>
+                      </select>
+                    </label>
+                    <div class="form-row">
+                      <label>Ollama base URL<input id="set-ollama-url" placeholder="http://localhost:11434" /></label>
+                      <label>Ollama model<input id="set-ollama-model" placeholder="llama3.2" /></label>
+                    </div>
+                    <div class="form-row">
+                      <label>Gemini model<input id="set-gemini-model" placeholder="gemini-2.0-flash" /></label>
+                      <label>Max model calls / day<input id="set-max-calls" type="number" min="1" max="5000" /></label>
+                    </div>
+                    <div class="form-actions">
+                      <button class="btn btn-primary" type="submit">Save engine</button>
+                      <button class="btn btn-ghost" type="button" id="btn-test-provider">Test connection</button>
+                      <span class="muted xs" id="provider-test-result"></span>
+                    </div>
+                  </form>
+                  <p class="hint">Running in Docker and Ollama on the host → <code>http://host.docker.internal:11434</code></p>
+                </div>
+
+                <div class="card panel">
+                  <header class="panel-head"><div><h3>Channels &amp; secrets</h3><p>Values come from <code>.env</code> — never shown here.</p></div></header>
+                  <ul class="check-list" id="secret-list"></ul>
+                  <div class="divider"></div>
+                  <h4 class="mini-head">Telegram</h4>
+                  <ul class="check-list" id="telegram-list"></ul>
+                </div>
               </div>
 
-              <div class="card panel">
-                <header class="panel-head"><div><h3>AI engine</h3><p>Ollama is free and private. Gemini is optional.</p></div></header>
-                <form id="settings-form" class="form">
-                  <label>Provider
-                    <select id="set-provider">
-                      <option value="auto">auto — Ollama → Gemini → offline</option>
-                      <option value="ollama">ollama only</option>
-                      <option value="gemini">gemini only</option>
-                      <option value="offline">offline rules only</option>
-                    </select>
-                  </label>
-                  <div class="form-row">
-                    <label>Ollama base URL<input id="set-ollama-url" placeholder="http://localhost:11434" /></label>
-                    <label>Ollama model<input id="set-ollama-model" placeholder="llama3.2" /></label>
-                  </div>
-                  <div class="form-row">
-                    <label>Gemini model<input id="set-gemini-model" placeholder="gemini-2.0-flash" /></label>
-                    <label>Max model calls / day<input id="set-max-calls" type="number" min="1" max="5000" /></label>
-                  </div>
-                  <div class="form-actions">
-                    <button class="btn btn-primary" type="submit">Save engine</button>
-                    <button class="btn btn-ghost" type="button" id="btn-test-provider">Test connection</button>
-                    <span class="muted xs" id="provider-test-result"></span>
-                  </div>
-                </form>
-                <p class="hint">n8n in Docker + Ollama on the host → <code>http://host.docker.internal:11434</code></p>
-              </div>
-
-              <div class="card panel">
-                <header class="panel-head"><div><h3>Channels &amp; secrets</h3><p>Values come from <code>.env</code> — never shown here.</p></div></header>
-                <ul class="check-list" id="secret-list"></ul>
-                <div class="divider"></div>
-                <h4 class="mini-head">Telegram</h4>
-                <ul class="check-list" id="telegram-list"></ul>
-              </div>
-
-              <div class="card panel">
-                <header class="panel-head"><div><h3>Google Sheets export</h3><p>Chapter 14 columns, one CSV per tab.</p></div></header>
+              <!-- exports + the destroy button, inside the same fold -->
+              <div class="grid-2" style="margin:0;padding:0 16px 16px">
+                <div class="card panel">
+                <header class="panel-head"><div><h3>Export as CSV</h3><p>One file per tab. Opens in Excel or Sheets.</p></div></header>
                 <div class="export-grid">
                   <a class="export-link" href="/api/export/tasks" download><b>Tasks</b><span>csv</span></a>
                   <a class="export-link" href="/api/export/drafts" download><b>Drafts</b><span>csv</span></a>
@@ -518,23 +532,18 @@
                   <a class="export-link" href="/api/export/daily-log" download><b>Daily Log</b><span>csv</span></a>
                   <a class="export-link" href="/api/export/all" download><b>Everything</b><span>json</span></a>
                 </div>
-                <div class="divider"></div>
-                <h4 class="mini-head">Deployment checklist</h4>
-                <ul class="checklist" id="deploy-list">
-                  <!-- Filled by renderDeployChecklist() from REAL state, not hardcoded. -->
-                  <li class="muted">Checking…</li>
-                </ul>
               </div>
 
               <div class="card panel danger">
-                <header class="panel-head"><div><h3>Data</h3><p>Everything lives in <code>data/db.json</code> on this machine.</p></div></header>
+                <header class="panel-head"><div><h3>Your data</h3><p>Everything lives in <code>data/db.json</code> on this machine.</p></div></header>
                 <div class="form-actions">
                   <button class="btn btn-ghost" id="btn-download-backup" type="button"><svg class="ic"><use href="#i-download" /></svg>Download backup</button>
                   <button class="btn btn-danger" id="btn-reset" type="button"><svg class="ic"><use href="#i-trash" /></svg>Reset office</button>
                 </div>
-                <p class="hint">Reset wipes tasks, drafts, leads, clients and logs. It cannot be undone.</p>
+                <p class="hint">Reset wipes tasks, drafts, leads, clients and logs. It cannot be undone. Run <code>npm run backup</code> first.</p>
               </div>
-            </div>
+              </div>
+            </details>
           </section>
 
           <!-- ───── Guide ───── -->
@@ -546,7 +555,7 @@
           </section>
         </main>
       </div>
-    </div>
+    <!-- .app ends here; the palette, modal, drawer and lock screen are siblings -->
 
     <!-- ────────── Command palette ────────── -->
     <div class="palette-backdrop" id="palette" hidden>
