@@ -71,6 +71,7 @@
           <button class="nav-item" data-view="console"><svg class="ic"><use href="#i-chat" /></svg><span>AI Console</span></button>
           <button class="nav-item" data-view="approvals"><svg class="ic"><use href="#i-check-circle" /></svg><span>Approvals</span><em class="badge" id="badge-approvals" hidden>0</em></button>
           <button class="nav-item" data-view="work"><svg class="ic"><use href="#i-bolt" /></svg><span>Work</span><em class="count" id="count-work">0</em></button>
+          <button class="nav-item" data-view="team"><svg class="ic"><use href="#i-users" /></svg><span>My Team</span><em class="count" id="count-team">0</em></button>
           <button class="nav-item" data-view="clients"><svg class="ic"><use href="#i-briefcase" /></svg><span>Clients</span><em class="count" id="count-clients">0</em></button>
           <button class="nav-item" data-view="finder"><svg class="ic"><use href="#i-target" /></svg><span>Client Finder</span><em class="count" id="count-leads">0</em></button>
           <button class="nav-item" data-view="calendar"><svg class="ic"><use href="#i-calendar" /></svg><span>Calendar</span></button>
@@ -99,16 +100,22 @@
             <p id="page-sub">Your whole office at a glance.</p>
           </div>
           <div class="topbar-right">
+            <button class="icon-btn" id="btn-help" type="button" title="What can I do on this page? (?)" aria-label="Page help">?</button>
             <button class="search-trigger" id="search-trigger" type="button">
               <svg class="ic"><use href="#i-search" /></svg>
               <span>Search or run a command</span>
               <kbd>⌘K</kbd>
             </button>
+            <span class="live-pill" id="live-pill" data-status="connecting" title="Live connection">
+              <span class="dot"></span><b>connecting</b>
+            </span>
             <button class="icon-btn" id="btn-brief-top" type="button" title="Morning brief"><svg class="ic"><use href="#i-moon" /></svg></button>
             <button class="btn btn-primary" id="btn-new" type="button"><svg class="ic"><use href="#i-plus" /></svg><span>New</span></button>
             <span class="avatar" id="avatar" title="You">F</span>
           </div>
         </header>
+
+        <div class="page-help" id="page-help" hidden></div>
 
         <main class="content" id="content">
           <!-- ───── Dashboard ───── -->
@@ -181,7 +188,7 @@
                   <div><h3>Next follow-ups</h3><p>Clients and leads that are due.</p></div>
                   <button class="link-btn" data-view="calendar">Calendar<svg class="ic"><use href="#i-chevron" /></svg></button>
                 </header>
-                <div class="list" id="followup-list"></div>
+                <div class="list" id="dash-followup-list"></div>
               </div>
               <div class="card panel">
                 <header class="panel-head">
@@ -268,6 +275,19 @@
             <div class="task-list" id="task-list"></div>
           </section>
 
+          <!-- ───── My Team ───── -->
+          <section class="view" data-view="team">
+            <div class="team-head" id="team-head"></div>
+            <div class="team-grid" id="team-grid"></div>
+            <div class="card panel" style="margin-top:16px">
+              <header class="panel-head">
+                <div><h3>What the team still needs from you</h3><p>Nothing moves downstream until you decide.</p></div>
+                <span class="tag" id="team-held-count">0 held</span>
+              </header>
+              <div class="list" id="team-held"></div>
+            </div>
+          </section>
+
           <!-- ───── Clients ───── -->
           <section class="view" data-view="clients">
             <div class="clients-head">
@@ -282,7 +302,16 @@
 
           <!-- ───── Client Finder ───── -->
           <section class="view" data-view="finder">
-            <div class="finder-grid">
+            <div class="toolbar">
+              <div class="segmented" id="finder-tabs">
+                <button class="is-active" data-pane="search"><svg class="ic"><use href="#i-target" /></svg>1 · Find</button>
+                <button data-pane="leads"><svg class="ic"><use href="#i-users" /></svg>2 · Leads <span id="seg-leads">0</span></button>
+                <button data-pane="audit"><svg class="ic"><use href="#i-shield" /></svg>3 · Audit <span id="seg-audited">0</span></button>
+                <button data-pane="manual"><svg class="ic"><use href="#i-plus" /></svg>4 · Add manually</button>
+              </div>
+              <div class="toolbar-right"><span class="muted xs" id="finder-hint">Find real businesses, check them, then audit the ones that matter.</span></div>
+            </div>
+            <div class="finder-grid finder-pane is-active" data-pane="search">
               <div class="card panel finder-form">
                 <header class="panel-head"><div><h3>Client Finder</h3><p>Public-source research. No scraping, no invented contacts.</p></div></header>
                 <form id="finder-form" class="form">
@@ -293,6 +322,10 @@
                 </form>
                 <div class="finder-result" id="finder-result"></div>
               </div>
+            </div>
+
+            <!-- pane 2 · leads + live search -->
+            <div class="finder-grid finder-pane" data-pane="leads">
               <div class="panel-stack">
                 <div class="card panel">
                   <header class="panel-head"><div><h3>Lead pipeline</h3><p>Every row needs a source URL and a human check.</p></div><span class="tag" id="leads-tag">0 leads</span></header>
@@ -330,10 +363,16 @@
                   </form>
                   <div id="source-result" class="source-result"></div>
                 </div>
+              </div>
+            </div>
+
+            <!-- pane 3 · audit + follow-ups -->
+            <div class="finder-grid finder-pane" data-pane="audit">
+              <div class="panel-stack">
                 <div class="card panel" id="audit-panel">
                   <header class="panel-head">
                     <div><h3>Website audit</h3><p>Opens the lead's page and reports only what is actually there. Evidence, never guesses.</p></div>
-                    <span class="tag" id="audit-count">0 audited</span>
+                    <span class="tag" id="finder-audit-count">0 audited</span>
                   </header>
                   <div class="form-actions">
                     <button class="btn btn-primary" type="button" id="btn-audit-batch">
@@ -351,7 +390,12 @@
                   </header>
                   <div id="followup-list" class="audit-findings"></div>
                 </div>
+              </div>
+            </div>
 
+            <!-- pane 4 · manual entry -->
+            <div class="finder-grid finder-pane" data-pane="manual">
+              <div class="panel-stack">
                 <div class="card panel">
                   <header class="panel-head"><div><h3>Add leads manually</h3><p>Paste what you saw, one business per line.</p></div></header>
                   <form id="lead-form" class="form compact">

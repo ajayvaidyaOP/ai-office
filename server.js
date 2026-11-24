@@ -5,6 +5,7 @@ import crypto from 'node:crypto';
 import { config, secretStatus, BRAND } from './src/config.js';
 import { store, seedDemoData, todayKey } from './src/store.js';
 import { dashboard, missionToday, overview } from './src/metrics.js';
+import { teamWork, teamSummary } from './src/team.js';
 import * as office from './src/office.js';
 import { AGENT_CATALOG } from './src/agents/prompts.js';
 import { testProvider } from './src/agents/index.js';
@@ -74,7 +75,10 @@ const readBody = (req, limit = 1_000_000) =>
 function authorised(req) {
   const code = config.access.code;
   if (!code) return true;
-  const given = String(req.headers['x-office-code'] || '');
+  // EventSource cannot send headers, so the live stream may pass the code in the
+  // query string instead. Same comparison, same constant time.
+  const url = new URL(req.url, 'http://localhost');
+  const given = String(req.headers['x-office-code'] || url.searchParams.get('code') || '');
   const a = Buffer.from(given);
   const b = Buffer.from(code);
   // Constant-time compare so the code cannot be guessed by timing.
@@ -92,6 +96,7 @@ export const statePayload = () => {
       timezone: config.timezone,
       settings: db.meta.settings,
       lastReportAt: db.meta.lastReportAt,
+      lastBackupAt: db.meta.lastBackupAt,
       lastBriefAt: db.meta.lastBriefAt,
       lastBrief: db.meta.lastBrief || null,
       lastProviderTest: db.meta.lastProviderTest,
@@ -116,6 +121,18 @@ export const statePayload = () => {
     scheduler: schedulerStatus(),
     commands: office.COMMANDS,
     agents: AGENT_CATALOG,
+    team: (() => {
+      const rows = teamWork({
+        catalog: AGENT_CATALOG,
+        runs: db.runs,
+        tasks: db.tasks,
+        drafts: db.drafts,
+        leads: db.leads,
+        clients: db.clients || [],
+        audit: db.audit,
+      });
+      return { rows, summary: teamSummary(rows) };
+    })(),
     tabs: Object.keys(TABS),
   };
 };
@@ -214,6 +231,50 @@ async function route(req, res, url) {
   }
 
   if (pathname === '/api/state' && method === 'GET') return sendJson(res, 200, statePayload());
+
+  /**
+   * Live stream (v2.3). The console used to poll /api/state every 30s, so a
+   * Telegram approval could take half a minute to appear. This pushes the new
+   * state the moment anything is written. Polling stays as the fallback.
+   */
+  if (pathname === '/api/stream' && method === 'GET') {
+    res.writeHead(200, {
+      ...SECURITY_HEADERS,
+      'content-type': 'text/event-stream; charset=utf-8',
+      'cache-control': 'no-store, no-transform',
+      connection: 'keep-alive',
+      'x-accel-buffering': 'no',
+    });
+    const send = (event, data) => {
+      res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+    };
+    send('hello', { version: config.version, at: new Date().toISOString() });
+
+    const off = store.onChange((action) => {
+      try {
+        send('state', { action, state: statePayload() });
+      } catch {
+        /* client vanished mid-write; the close handler will clean up */
+      }
+    });
+    // Keep proxies and browsers from dropping an idle connection.
+    const beat = setInterval(() => {
+      try {
+        res.write(': ping\n\n');
+      } catch {
+        /* ignore */
+      }
+    }, 25_000);
+    if (beat.unref) beat.unref();
+
+    const close = () => {
+      clearInterval(beat);
+      off();
+    };
+    req.on('close', close);
+    req.on('error', close);
+    return undefined;
+  }
   if (pathname === '/api/source/status' && method === 'GET') return sendJson(res, 200, sourcingStatus());
 
   if (pathname === '/api/docs' && method === 'GET') return sendJson(res, 200, { docs: listDocs() });
