@@ -309,11 +309,59 @@ export function offlineQuality(draft, { platform } = {}) {
 }
 
 /** Chapter 8 outreach — respects the "verified facts only" rule. */
-export function offlineOutreach({ businessName, website, fitReason }) {
+/**
+ * Offline outreach writer.
+ *
+ * Same rules as the human playbook in docs/client-team-pune-pitchpack.md:
+ *  - real business name + ONE specific observed problem
+ *  - say what it costs them, in plain words
+ *  - offer one quick win, no price, no fake compliment
+ *  - end with a soft yes/no question
+ *  - never paste the revision feedback into the message body
+ *
+ * It only claims what the auditor actually found. With no audit it asks,
+ * instead of asserting a defect it has not seen.
+ */
+export function offlineOutreach({ businessName, website, fitReason, findings = [], feedback = '' }) {
   const name = businessName || 'your team';
-  const observation = fitReason || 'you share useful updates on social media';
-  const site = website ? ` I found you at ${website}.` : '';
-  return `Hi ${name},${site}\n\nI noticed ${observation}. I work with small teams that want a calmer way to keep content and follow-ups moving without hiring more people.\n\nWould it be useful if I sent one short example of what that could look like for you? No pitch attached — just a sample.`;
+  const list = (Array.isArray(findings) ? findings : [])
+    .map((item) => (typeof item === 'string' ? item : item?.title))
+    .filter(Boolean);
+  const primary = list[0] || '';
+  const second = list[1] || '';
+  const site = website ? website.replace(/^https?:\/\//, '').replace(/\/$/, '').replace(/^www\./, '') : 'your page';
+  const wantsShorter = /short|trim|brief|concise/i.test(String(feedback || ''));
+
+  const opener = primary
+    ? `Hi ${name} — I opened ${site} today and ${lower(primary)}.`
+    : `Hi ${name} — I opened ${site} today and could not find a clear way to book or order from it.`;
+  const cost = primary ? `A customer ready to ${guessAction(primary)} stops there and goes to the next option.` : '';
+  const extra = !wantsShorter && second ? ` I also saw ${lower(second)}.` : '';
+  const offer = primary
+    ? 'I can fix that one step and test it on a phone, free, before you decide anything.'
+    : 'I can add one clear booking or order button and test it on a phone, free, before you decide anything.';
+  const ask = 'Want me to send a 30-second recording of it?';
+
+  const message = [opener, [cost, extra].filter(Boolean).join(' '), offer, ask].filter(Boolean).join(' ');
+  const words = message.split(/\s+/).filter(Boolean);
+  return words.length > 90 ? `${words.slice(0, 88).join(' ')}?` : message;
+}
+
+const lower = (text) => {
+  const clean = String(text || '').trim();
+  if (!clean) return '';
+  return /^[A-Z]{2,}/.test(clean) ? clean : clean.charAt(0).toLowerCase() + clean.slice(1);
+};
+
+/** What the customer was trying to do when this defect stopped them. */
+function guessAction(finding) {
+  const text = String(finding).toLowerCase();
+  if (/book|appointment|slot|schedule|trial/.test(text)) return 'book an appointment';
+  if (/order|menu|price|cart|checkout|payment|\$/.test(text)) return 'place an order';
+  if (/ssl|certificate|http|500|error|unreachable|down/.test(text)) return 'open your website';
+  if (/mobile|viewport|responsive/.test(text)) return 'read your page on a phone';
+  if (/instagram|facebook|link in bio|catalogue|catalog/.test(text)) return 'see what you sell';
+  return 'get in touch';
 }
 
 /** Chapter 5 daily reporting agent — data-only summary. */
@@ -404,20 +452,60 @@ export const nextStage = (stage) => {
  * Deterministic 0-100 fit score. Deliberately explainable:
  * every point comes from something a human can see.
  */
+/**
+ * Lead score = how badly this business needs the offer, not how complete the row is.
+ *
+ * Two halves:
+ *   1. Reachability & data quality (max 55) — can you actually reach this business?
+ *   2. Opportunity (max 45) — does the audit say something is broken right now?
+ *
+ * The opportunity half is driven by `audit.severity` set by the Website Auditor.
+ * A business with NO website and a reachable phone is a better prospect than a
+ * business with a perfect website — that is the whole point of the offer.
+ */
 export function scoreLead(lead = {}) {
-  let score = 18;
+  let score = 10;
   const reasons = [];
-  if (/^https?:\/\//i.test(String(lead.sourceUrl || ''))) { score += 18; reasons.push('public source'); }
-  if (/^https?:\/\//i.test(String(lead.website || ''))) { score += 14; reasons.push('website found'); }
-  if (String(lead.fitReason || '').length >= 20) { score += 12; reasons.push('specific fit reason'); }
-  if (String(lead.niche || '').length > 2) { score += 8; reasons.push('niche known'); }
-  if (String(lead.location || '').length > 1) { score += 5; reasons.push('location known'); }
-  if (lead.reviewStatus === 'Verified by human') { score += 20; reasons.push('human verified'); }
-  if (['Contacted', 'Replied', 'Won'].includes(lead.stage)) { score += 6; reasons.push('already in conversation'); }
-  if (String(lead.notes || '').length > 10) { score += 4; reasons.push('context notes'); }
-  if (!lead.sourceUrl) { score -= 10; reasons.push('missing source'); }
-  if (lead.stage === 'Lost') { score = Math.min(score, 25); reasons.push('marked lost'); }
-  return { score: Math.max(4, Math.min(98, Math.round(score))), reasons };
+
+  /* ── reachability & row quality ─────────────────────────── */
+  if (/^https?:\/\//i.test(String(lead.sourceUrl || ''))) { score += 10; reasons.push('public source'); }
+  else { score -= 8; reasons.push('missing source'); }
+
+  const hasPhone = String(lead.phone || '').trim().length >= 6;
+  if (hasPhone) { score += 8; reasons.push('phone published'); }
+
+  if (String(lead.fitReason || '').length >= 20) { score += 4; reasons.push('specific fit reason'); }
+  if (String(lead.niche || '').length > 2) { score += 3; reasons.push('niche known'); }
+  if (String(lead.location || '').length > 1) { score += 2; reasons.push('location known'); }
+  if (lead.reviewStatus === 'Verified by human') { score += 5; reasons.push('human verified'); }
+
+  /* ── opportunity: what the auditor found ────────────────── */
+  const audit = lead.audit || {};
+  const severity = normaliseSeverity(audit.severity);
+  const opportunity = { high: 45, medium: 28, low: 8, none: 0 }[severity];
+
+  if (audit.severity) {
+    score += opportunity;
+    reasons.push(`${severity}-severity gap · ${(audit.findings || []).length} finding(s)`);
+  } else if (!String(lead.website || '').trim()) {
+    // No website at all is itself the strongest signal — nobody audited it because there is nothing to audit.
+    score += 32;
+    reasons.push('no website at all — strongest pitch angle');
+  } else {
+    reasons.push('not audited yet — score is provisional');
+  }
+
+  /* ── momentum: conversations move up, dead ends move down ── */
+  if (['Contacted', 'Replied'].includes(lead.stage)) { score += 6; reasons.push('already in conversation'); }
+  if (lead.stage === 'Won') { score += 10; reasons.push('deal won'); }
+  if (lead.stage === 'Lost') { score = Math.min(score, 20); reasons.push('marked lost'); }
+
+  return { score: Math.max(4, Math.min(98, Math.round(score))), reasons, severity };
+}
+
+function normaliseSeverity(value) {
+  const text = String(value || '').toLowerCase();
+  return ['high', 'medium', 'low', 'none'].includes(text) ? text : '';
 }
 
 /** Chapter 8 morning brief, offline edition. */

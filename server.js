@@ -1,6 +1,7 @@
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
+import crypto from 'node:crypto';
 import { config, secretStatus, BRAND } from './src/config.js';
 import { store, seedDemoData, todayKey } from './src/store.js';
 import { dashboard, missionToday, overview } from './src/metrics.js';
@@ -11,6 +12,7 @@ import { providerStatus } from './src/agents/provider.js';
 import { sourcingStatus } from './src/agents/sourcing.js';
 import { TABS, tabCsv } from './src/sheets.js';
 import { handleTelegramUpdate, startTelegramPolling, telegramStatus } from './src/channels/telegram.js';
+import { startScheduler, schedulerStatus, runMorningRoutine } from './src/scheduler.js';
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -70,9 +72,14 @@ const readBody = (req, limit = 1_000_000) =>
   });
 
 function authorised(req) {
-  const code = process.env.OFFICE_ACCESS_CODE;
+  const code = config.access.code;
   if (!code) return true;
-  return req.headers['x-office-code'] === code;
+  const given = String(req.headers['x-office-code'] || '');
+  const a = Buffer.from(given);
+  const b = Buffer.from(code);
+  // Constant-time compare so the code cannot be guessed by timing.
+  if (a.length !== b.length) return false;
+  return crypto.timingSafeEqual(a, b);
 }
 
 export const statePayload = () => {
@@ -105,6 +112,8 @@ export const statePayload = () => {
     provider: providerStatus(),
     telegram: telegramStatus(),
     secrets: secretStatus(),
+    followups: office.followUpQueue(),
+    scheduler: schedulerStatus(),
     commands: office.COMMANDS,
     agents: AGENT_CATALOG,
     tabs: Object.keys(TABS),
@@ -180,8 +189,28 @@ async function route(req, res, url) {
     }
   }
 
+  if (pathname === '/api/auth' && method === 'GET') {
+    return sendJson(res, 200, { ok: true, required: Boolean(config.access.code) });
+  }
+
+  if (pathname === '/api/auth/login' && method === 'POST') {
+    const body = await readBody(req);
+    const given = String(body.code || '');
+    const expected = config.access.code;
+    const matched =
+      Boolean(expected) &&
+      Buffer.byteLength(given) === Buffer.byteLength(expected) &&
+      crypto.timingSafeEqual(Buffer.from(given), Buffer.from(expected));
+    if (!matched) {
+      store.audit('auth.failed', { detail: 'wrong access code', level: 'warn' });
+      return sendJson(res, 401, { ok: false, error: 'That access code is not right.' });
+    }
+    store.audit('auth.ok', { detail: 'console unlocked' });
+    return sendJson(res, 200, { ok: true });
+  }
+
   if (pathname.startsWith('/api/') && !authorised(req)) {
-    return sendJson(res, 401, { ok: false, error: 'Add the x-office-code header' });
+    return sendJson(res, 401, { ok: false, error: 'Add the x-office-code header', authRequired: true });
   }
 
   if (pathname === '/api/state' && method === 'GET') return sendJson(res, 200, statePayload());
@@ -303,6 +332,31 @@ async function route(req, res, url) {
     );
   }
 
+  /* ── Website auditor ─────────────────────────────────────── */
+  if (pathname === '/api/audit' && method === 'POST') {
+    return action(async (body) =>
+      body.id
+        ? office.auditOneLead(body.id, body.actor || 'owner')
+        : office.auditLeads({ ids: body.ids || [], limit: body.limit, onlyUnverified: body.onlyUnverified }, body.actor || 'owner'),
+    )(req, res, await readBody(req));
+  }
+
+  /* ── Scheduler ───────────────────────────────────────────── */
+  if (pathname === '/api/scheduler/run' && method === 'POST') {
+    return action(async () => runMorningRoutine({ reason: 'manual' }))(req, res, {});
+  }
+
+  /* ── Follow-ups ──────────────────────────────────────────── */
+  if (pathname === '/api/followups' && method === 'GET') {
+    return sendJson(res, 200, { ok: true, queue: office.followUpQueue() });
+  }
+  if (pathname === '/api/followups/sent' && method === 'POST') {
+    return action(async (body) => office.markFollowUpSent(body, body.actor || 'owner'))(req, res, await readBody(req));
+  }
+  if (pathname === '/api/leads/sent' && method === 'POST') {
+    return action(async (body) => office.markLeadSent(body, body.actor || 'owner'))(req, res, await readBody(req));
+  }
+
   /* ── Clients ─────────────────────────────────────────────── */
   if (pathname === '/api/clients' && method === 'POST') {
     return action(async (body) => office.addClient(body, body.actor || 'owner'))(req, res, await readBody(req));
@@ -373,9 +427,34 @@ async function route(req, res, url) {
   if (pathname === '/api/reset' && method === 'POST') {
     try {
       const body = await readBody(req);
+      /*
+       * Two explicit intents, never an accident:
+       *   { confirm: 'DELETE EVERYTHING' }  → empty office
+       *   { confirm: 'DELETE EVERYTHING', seed: true } → reset + demo data
+       * A stray click or an empty body used to wipe every lead silently.
+       */
+      if (body.confirm !== 'DELETE EVERYTHING') {
+        return sendJson(res, 400, {
+          ok: false,
+          error: "Refused: send { \"confirm\": \"DELETE EVERYTHING\" } to wipe the office.",
+          counts: {
+            leads: store.db.leads.length,
+            clients: (store.db.clients || []).length,
+            tasks: store.db.tasks.length,
+            drafts: store.db.drafts.length,
+          },
+        });
+      }
+      const before = {
+        leads: store.db.leads.length,
+        clients: (store.db.clients || []).length,
+      };
       store.reset({ seed: Boolean(body.seed) });
-      store.audit('office.reset', { detail: body.seed ? 'reset + demo data' : 'reset to empty', level: 'warn' });
-      return ok(res);
+      store.audit('office.reset', {
+        detail: `${before.leads} lead(s), ${before.clients} client(s) deleted · ${body.seed ? 'demo data seeded' : 'started empty'}`,
+        level: 'warn',
+      });
+      return ok(res, { deleted: before });
     } catch (error) {
       return sendJson(res, 400, { ok: false, error: error.message });
     }
@@ -426,6 +505,12 @@ server.listen(config.port, config.host, () => {
   console.log(`  ➜ Provider: ${providerStatus().configured} (offline rules always available)`);
   const polling = startTelegramPolling();
   if (polling.started) console.log('  ➜ Telegram: polling for commands');
+  const scheduler = startScheduler();
+  console.log(
+    scheduler.started
+      ? `  ➜ Scheduler: daily brief + follow-ups at ${String(config.scheduler.hour).padStart(2, '0')}:${String(config.scheduler.minute).padStart(2, '0')} ${config.timezone}`
+      : `  ➜ Scheduler: off (${scheduler.reason})`,
+  );
   console.log('');
 });
 

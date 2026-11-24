@@ -57,6 +57,28 @@ export const config = {
 
   access: {
     allowedUserIds: list(process.env.ALLOWED_USER_IDS || 'owner'),
+    /** When set, every /api/* call must send x-office-code. The UI collects it once. */
+    code: process.env.OFFICE_ACCESS_CODE || '',
+  },
+
+  /** Auditor agent — how hard it is allowed to look at a lead's website. */
+  audit: {
+    timeoutMs: num(process.env.AUDIT_TIMEOUT_MS, 8000),
+    maxBytes: num(process.env.AUDIT_MAX_BYTES, 400000),
+    perRun: num(process.env.AUDIT_PER_RUN, 5),
+  },
+
+  /** Follow-up cadence in days. Empty string disables a step. */
+  followUp: {
+    first: num(process.env.FOLLOWUP_DAYS_1, 3),
+    second: num(process.env.FOLLOWUP_DAYS_2, 7),
+  },
+
+  /** In-process scheduler. Off by default in tests (SCHEDULER=off). */
+  scheduler: {
+    enabled: String(process.env.SCHEDULER || 'on').toLowerCase() !== 'off',
+    hour: num(process.env.SCHEDULER_HOUR, 9),
+    minute: num(process.env.SCHEDULER_MINUTE, 0),
   },
 
   ai: {
@@ -86,6 +108,8 @@ export const config = {
 
   telegram: {
     botToken: process.env.TELEGRAM_BOT_TOKEN || '',
+    /** Where scheduled briefs are delivered. Deliberately separate from client data. */
+    ownerChatId: process.env.TELEGRAM_OWNER_CHAT_ID || '',
     allowedUserIds: list(process.env.ALLOWED_TELEGRAM_USER_IDS || process.env.ALLOWED_USER_IDS || 'owner'),
     webhookSecret: process.env.WEBHOOK_SECRET || '',
   },
@@ -97,6 +121,7 @@ export const hasSecret = (value) => Boolean(value && String(value).trim());
 
 /** True when a usable secret is configured — never returns the secret itself. */
 export const secretStatus = () => ({
+  accessCode: hasSecret(config.access.code),
   placesApiKey: hasSecret(config.sourcing.placesKey),
   telegramBotToken: hasSecret(config.telegram.botToken),
   geminiKey: hasSecret(config.ai.geminiKey),

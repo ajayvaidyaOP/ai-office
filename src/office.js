@@ -1,6 +1,6 @@
 import { store, todayKey, officeTime } from './store.js';
 import { dashboard, missionToday, overview } from './metrics.js';
-import { BRAND } from './config.js';
+import { BRAND, config } from './config.js';
 import {
   runBrief,
   runContent,
@@ -18,6 +18,7 @@ import {
 } from './agents/index.js';
 import { sourceLeads, sourcingStatus } from './agents/sourcing.js';
 import { extractIds, LEAD_STAGES, offlineBrief, offlineProposal } from './agents/offline.js';
+import { auditLead, auditSummary, summarise } from './agents/auditor.js';
 
 export const COMMANDS = [
   { command: '/task', group: 'Work', description: 'Plan the work you describe into 1-5 tasks', example: '/task Plan a Reel about free AI tools' },
@@ -35,6 +36,11 @@ export const COMMANDS = [
   { command: '/stage', group: 'Clients', description: 'Move a lead or client pipeline stage', example: '/stage C-0002 Negotiation' },
   { command: '/outreach', group: 'Clients', description: 'Draft a first message for a lead', example: '/outreach L-0001' },
   { command: '/proposal', group: 'Clients', description: 'Draft a proposal for a client', example: '/proposal C-0002' },
+  { command: '/audit', group: 'Clients', description: 'Open a lead’s website and list what is actually broken', example: '/audit L-0007' },
+  { command: '/audit-all', group: 'Clients', description: 'Audit up to 5 unverified leads in one go', example: '/audit-all 5' },
+  { command: '/sent', group: 'Clients', description: 'Mark a lead’s first message as sent by hand (starts the day-3 clock)', example: '/sent L-0007' },
+  { command: '/followups', group: 'Clients', description: 'Who is due a day-3 or day-7 follow-up, with the exact text', example: '/followups' },
+  { command: '/followup-sent', group: 'Clients', description: 'Mark a follow-up as sent by hand', example: '/followup-sent L-0007 3' },
   { command: '/clients', group: 'Clients', description: 'List clients and open pipeline', example: '/clients' },
   { command: '/done', group: 'Tasks', description: 'Mark a task done', example: '/done T-0001' },
   { command: '/progress', group: 'Tasks', description: 'Move a task to In Progress', example: '/progress T-0001' },
@@ -174,7 +180,12 @@ export async function createDraft(input, actor = 'owner') {
   let qa = { decision: 'approve', issues: [], suggested_revision: '' };
 
   if (kind === 'outreach' && lead) {
-    const result = await runOutreach({ businessName: lead.businessName, website: lead.website, fitReason: lead.fitReason });
+    const result = await runOutreach({
+      businessName: lead.businessName,
+      website: lead.website,
+      fitReason: lead.fitReason,
+      findings: lead.audit?.findings || [],
+    });
     draftText = result.draft;
     provider = result.provider;
   } else if (kind === 'proposal' && client) {
@@ -321,12 +332,22 @@ export async function decideDraft({ id, decision, feedback = '' }, actor = 'owne
   let draftText = '';
   let provider = 'offline';
 
+  /*
+   * Feedback is an INSTRUCTION, never body text. It goes into a separate
+   * `feedback` field so it can never be pasted into the message we send.
+   * (Before this, /revise glued the note onto the old draft text.)
+   */
+  const feedbackInstruction = note ? `Revision feedback to apply: ${note}.` : '';
+
   if (draft.kind === 'outreach') {
     const lead = store.db.leads.find((row) => row.id === draft.leadId);
     const result = await runOutreach({
       businessName: lead?.businessName || draft.title,
       website: lead?.website || '',
-      fitReason: `${lead?.fitReason || ''} ${note}`.trim(),
+      fitReason: lead?.fitReason || '',
+      findings: lead?.audit?.findings || [],
+      previousDraft: draft.draft || '',
+      feedback: feedbackInstruction,
     });
     draftText = result.draft;
     provider = result.provider;
@@ -337,16 +358,19 @@ export async function decideDraft({ id, decision, feedback = '' }, actor = 'owne
       contact: client?.contact || '',
       niche: client?.niche || '',
       value: client?.value || 0,
-      notes: `${client?.notes || ''} ${note}`.trim(),
+      notes: client?.notes || '',
+      feedback: feedbackInstruction,
     });
     draftText = result.text;
     provider = result.provider;
   } else {
     const result = await runContent({
-      request: [draft.request, note ? `Revision feedback: ${note}` : ''].filter(Boolean).join('\n'),
+      request: draft.request,
       platform: draft.platform,
       audience: draft.audience,
       tone: draft.tone,
+      feedback: feedbackInstruction,
+      previousDraft: draft.draft || '',
     });
     draftText = result.draft;
     provider = result.provider;
@@ -618,6 +642,165 @@ export function setClientStage(id, stage, actor = 'owner') {
   return { client };
 }
 
+/* ═══════════════════════════════════════════════════════════════
+   WEBSITE AUDITOR
+   The lead list says "probably needs my service". This makes the
+   office prove it, with evidence, before a message is written.
+   ═══════════════════════════════════════════════════════════════ */
+
+/** Audit one lead and store the result on the row (gated: audit only, never contact). */
+export async function auditOneLead(id, actor = 'owner', { respectVerification = true } = {}) {
+  const lead = store.db.leads.find((row) => row.id === String(id || '').toUpperCase());
+  if (!lead) throw new Error(`Lead ${id} not found.`);
+
+  const result = await auditLead(lead);
+  lead.audit = {
+    ...result,
+    by: actor,
+    // A machine check is evidence, not human verification.
+    needsHumanCheck: result.findings.some((f) => f.unverified),
+  };
+  lead.auditSummary = auditSummary(lead.audit);
+  if (result.severity === 'high') {
+    lead.nextAction = 'Fix offer ready — send a free micro-fix note';
+  } else if (result.severity === 'medium') {
+    lead.nextAction = 'Lead with one specific fix in the first message';
+  }
+  if (respectVerification && lead.reviewStatus !== 'Verified by human') {
+    lead.reviewStatus = 'Needs human verification';
+  }
+  const scored = scoreLead(lead);
+  lead.score = scored.score;
+  lead.scoreReasons = scored.reasons;
+
+  store.save();
+  store.audit('lead.audited', {
+    actor,
+    ref: lead.id,
+    detail: `${result.severity} · ${result.findings.length} finding(s) · ${lead.businessName}`,
+  });
+  return { lead, audit: lead.audit };
+}
+
+/**
+ * Audit a batch. Bounded on purpose: this hits other people's servers,
+ * so we are gentle by default and never unbounded.
+ */
+export async function auditLeads({ ids = [], limit = 5, onlyUnverified = false } = {}, actor = 'owner') {
+  const max = Math.min(Math.max(Number(limit) || config.audit.perRun, 1), 20);
+  const pool = store.db.leads.filter((row) => {
+    if (ids.length) return ids.includes(row.id);
+    if (onlyUnverified) return !row.audit;
+    return ['New', 'Verified', 'Contacted'].includes(row.stage);
+  });
+  const picked = pool.slice(0, max);
+  const rows = [];
+  for (const lead of picked) {
+    try {
+      const { audit } = await auditOneLead(lead.id, actor);
+      rows.push({ id: lead.id, businessName: lead.businessName, severity: audit.severity, findings: audit.findings.length });
+      // Be a good citizen: small gap between external requests.
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    } catch (error) {
+      rows.push({ id: lead.id, businessName: lead.businessName, error: error.message });
+    }
+  }
+  return { ok: true, audited: rows.length, remaining: Math.max(0, pool.length - picked.length), rows };
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   FOLLOW-UP ENGINE
+   Day 3 and Day 7, per lead/client, with templates that do not
+   beg. Nothing is sent — these are drafts you copy.
+   ═══════════════════════════════════════════════════════════════ */
+
+const DAY = 86_400_000;
+const addDays = (iso, days) => new Date(new Date(iso).getTime() + days * DAY).toISOString().slice(0, 10);
+
+export function followUpTemplates({ name, problem = '', businessName = '' }) {
+  const who = name || 'there';
+  return {
+    day3: `Hi ${who}, quick one — did my note about ${problem || 'your website'} reach you? Happy to send the fix notes either way, even if you do not want to work together. Just say yes and I will drop them here.`,
+    day7: `Hi ${who}, last message from me on this. I checked again today and ${problem || 'the issue'} is still there. Two options: (a) I send you the 3-step fix to hand to anyone, free, or (b) 15 minutes on a call and I will tell you what I would do first. Reply A or B and I will stop following up.`,
+  };
+}
+
+/**
+ * Build the follow-up queue: who is due, at which step, with the exact text.
+ * "Due" means the scheduled date is today or in the past.
+ */
+export function followUpQueue({ today = todayKey() } = {}) {
+  const rows = [];
+
+  for (const lead of store.db.leads) {
+    if (['Lost', 'Won'].includes(lead.stage)) continue;
+    if (!['Contacted', 'Replied', 'Verified'].includes(lead.stage)) continue;
+    const sent = lead.sentAt || lead.lastTouchAt;
+    if (!sent) continue;
+    const top = [...(lead.audit?.findings || [])].sort((a, b) => (b.severity === 'high') - (a.severity === 'high'))[0];
+    const templates = followUpTemplates({
+      name: lead.businessName,
+      problem: top?.title || '',
+      businessName: lead.businessName,
+    });
+    const step3 = addDays(sent, config.followUp.first);
+    const step7 = addDays(sent, config.followUp.second);
+    const done = new Set((lead.followUpsSent || []).map((row) => row.step));
+    if (!done.has(3) && step3 <= today) {
+      rows.push({ kind: 'lead', id: lead.id, name: lead.businessName, step: 3, due: step3, channel: lead.channel || 'Instagram DM', text: templates.day3 });
+    } else if (!done.has(7) && step7 <= today) {
+      rows.push({ kind: 'lead', id: lead.id, name: lead.businessName, step: 7, due: step7, channel: lead.channel || 'Instagram DM', text: templates.day7 });
+    }
+  }
+
+  for (const client of store.db.clients || []) {
+    if (['Lost', 'Won'].includes(client.stage)) continue;
+    const sent = client.proposalSentAt || client.lastTouchAt;
+    if (!sent) continue;
+    const templates = followUpTemplates({ name: client.company, problem: client.notes || '' });
+    const step3 = addDays(sent, config.followUp.first);
+    const step7 = addDays(sent, config.followUp.second);
+    const done = new Set((client.followUpsSent || []).map((row) => row.step));
+    if (!done.has(3) && step3 <= today) {
+      rows.push({ kind: 'client', id: client.id, name: client.company, step: 3, due: step3, channel: 'Email', text: templates.day3 });
+    } else if (!done.has(7) && step7 <= today) {
+      rows.push({ kind: 'client', id: client.id, name: client.company, step: 7, due: step7, channel: 'Email', text: templates.day7 });
+    }
+  }
+
+  return rows.sort((a, b) => a.due.localeCompare(b.due));
+}
+
+/** Record a follow-up as sent (still manual — you copy and send it). */
+export function markFollowUpSent({ kind, id, step }, actor = 'owner') {
+  const list = kind === 'client' ? store.db.clients : store.db.leads;
+  const row = list.find((item) => item.id === String(id || '').toUpperCase());
+  if (!row) throw new Error(`${id} not found.`);
+  row.followUpsSent = [...(row.followUpsSent || []), { step: Number(step) || 3, at: new Date().toISOString(), by: actor }];
+  row.lastTouchAt = new Date().toISOString();
+  row.nextFollowUp = null;
+  store.save();
+  store.audit('followup.sent', { actor, ref: row.id, detail: `day ${step} follow-up copied and sent manually` });
+  return { row };
+}
+
+/** Mark the first outreach as actually sent — the missing link between "approved" and "sent". */
+export function markLeadSent({ id, channel = '' }, actor = 'owner') {
+  const lead = store.db.leads.find((row) => row.id === String(id || '').toUpperCase());
+  if (!lead) throw new Error(`Lead ${id} not found.`);
+  if (lead.reviewStatus !== 'Verified by human') {
+    throw new Error('Verify this lead against its source before marking it sent.');
+  }
+  lead.sentAt = new Date().toISOString();
+  lead.lastTouchAt = lead.sentAt;
+  lead.contactStatus = 'Contacted';
+  if (['New', 'Verified'].includes(lead.stage)) lead.stage = 'Contacted';
+  if (channel) lead.channel = channel;
+  store.save();
+  store.audit('lead.sent_manual', { actor, ref: lead.id, detail: `first message sent by hand · ${channel || 'unspecified channel'}` });
+  return { lead };
+}
+
 export function setFollowUp({ kind, id, date }, actor = 'owner') {
   const list = kind === 'lead' ? store.db.leads : store.db.clients;
   const row = list.find((item) => item.id === String(id || '').toUpperCase());
@@ -790,6 +973,16 @@ export async function handleCommand({ raw = '', actor = 'owner', channel = 'web'
       return commandPromote(rest, actor);
     case '/stage':
       return commandStage(rest, actor);
+    case '/audit':
+      return commandAudit(rest, actor);
+    case '/audit-all':
+      return commandAuditAll(rest, actor);
+    case '/sent':
+      return commandSent(rest, actor);
+    case '/followups':
+      return commandFollowUps(actor);
+    case '/followup-sent':
+      return commandFollowUpSent(rest, actor);
     case '/outreach':
       return commandOutreach(rest, actor);
     case '/proposal':
@@ -1191,6 +1384,104 @@ async function commandStage(rest, actor) {
     }
     const { lead } = setLeadStage(id, stage, actor);
     return reply({ text: `🔄 ${lead.id} · ${lead.businessName} → ${lead.stage} (score ${lead.score})` });
+  } catch (error) {
+    return reply({ text: error.message });
+  }
+}
+
+async function commandAudit(rest, actor) {
+  const ids = extractIds(rest, 'lead');
+  if (!ids.length) return reply({ text: 'Usage: /audit L-0007 — I open the page and report only what is actually there.' });
+  try {
+    const { lead, audit } = await auditOneLead(ids[0], actor);
+    const lines = [
+      `🔎 AUDIT — ${lead.businessName} (${lead.id})`,
+      `Page: ${audit.finalUrl || audit.url || 'no website on file'}`,
+      `Severity: ${audit.severity.toUpperCase()} · score now ${lead.score}`,
+      '',
+    ];
+    if (!audit.findings.length) lines.push('No problems found by the checks I can run.');
+    audit.findings
+      .sort((a, b) => ({ high: 3, medium: 2, low: 1 }[b.severity] || 0) - ({ high: 3, medium: 2, low: 1 }[a.severity] || 0))
+      .forEach((finding, index) => {
+        lines.push(`${index + 1}. [${finding.severity}] ${finding.title}`);
+        if (finding.evidence) lines.push(`   Evidence: ${finding.evidence}`);
+        if (finding.fix) lines.push(`   Fix: ${finding.fix}`);
+        if (finding.note) lines.push(`   Note: ${finding.note}`);
+      });
+    lines.push('', 'Nothing here is a guess — everything above was read from the page itself.');
+    lines.push(`Next: /outreach ${lead.id} to draft a message built on this evidence.`);
+    return reply({
+      text: lines.join('\n'),
+      buttons: [{ label: 'Draft outreach', command: `/outreach ${lead.id}`, tone: 'good' }],
+      ref: lead.id,
+    });
+  } catch (error) {
+    return reply({ text: error.message });
+  }
+}
+
+async function commandAuditAll(rest, actor) {
+  const limit = Number((rest.match(/\d+/) || [5])[0]) || 5;
+  try {
+    const result = await auditLeads({ limit, onlyUnverified: true }, actor);
+    if (!result.audited) return reply({ text: 'Nothing to audit. Every active lead already has an audit.' });
+    const lines = [`🔎 AUDITED ${result.audited} LEAD${result.audited === 1 ? '' : 'S'}${result.remaining ? ` · ${result.remaining} still waiting` : ''}`, ''];
+    result.rows.forEach((row) => {
+      lines.push(row.error ? `• ${row.id} ${row.businessName} — could not check: ${row.error}` : `• ${row.id} ${row.businessName} — ${row.severity} · ${row.findings} finding(s)`);
+    });
+    lines.push('', 'Evidence only. A human still verifies each row before anything is sent.');
+    return reply({ text: lines.join('\n') });
+  } catch (error) {
+    return reply({ text: error.message });
+  }
+}
+
+async function commandSent(rest, actor) {
+  const ids = extractIds(rest, 'lead');
+  if (!ids.length) return reply({ text: 'Usage: /sent L-0007 — call this AFTER you have actually pasted and sent the message yourself.' });
+  try {
+    const channel = rest.replace(/L-\d{4}/i, '').trim();
+    const { lead } = markLeadSent({ id: ids[0], channel }, actor);
+    return reply({
+      text: [
+        `📨 ${lead.id} ${lead.businessName} marked sent by you.`,
+        '',
+        `Day ${config.followUp.first} follow-up falls on ${addDays(lead.sentAt, config.followUp.first)}.`,
+        `Day ${config.followUp.second} falls on ${addDays(lead.sentAt, config.followUp.second)}.`,
+        '',
+        'If they do not reply, /followups will hand you the exact next message.',
+      ].join('\n'),
+    });
+  } catch (error) {
+    return reply({ text: error.message });
+  }
+}
+
+function commandFollowUps(actor) {
+  const queue = followUpQueue();
+  if (!queue.length) {
+    return reply({ text: 'No follow-ups due. Nothing to chase today — that is a good sign, not an empty screen.' });
+  }
+  const lines = [`⏰ FOLLOW-UPS DUE — ${queue.length}`, ''];
+  queue.slice(0, 8).forEach((row) => {
+    lines.push(`${row.step === 3 ? 'Day 3' : 'Day 7'} · ${row.id} ${row.name} · ${row.channel} · due ${row.due}`);
+    lines.push(`   "${row.text.slice(0, 140)}${row.text.length > 140 ? '…' : ''}"`);
+    lines.push('');
+  });
+  lines.push('Copy, send by hand, then /followup-sent <ID> <step>.');
+  return reply({ text: lines.join('\n') });
+}
+
+function commandFollowUpSent(rest, actor) {
+  const ids = extractIds(rest, 'lead');
+  const step = Number((rest.match(/\b([37])\b/) || [3])[0]) || 3;
+  const anyId = ids[0] || (rest.match(/C-\d{4}/i) || [''])[0].toUpperCase();
+  if (!anyId) return reply({ text: 'Usage: /followup-sent L-0007 3' });
+  try {
+    const kind = anyId.startsWith('C-') ? 'client' : 'lead';
+    const { row } = markFollowUpSent({ kind, id: anyId, step }, actor);
+    return reply({ text: `✅ ${row.id} — day ${step} follow-up marked sent. Next one is day ${step === 3 ? config.followUp.second : 'none — re-touch in 60 days'}.` });
   } catch (error) {
     return reply({ text: error.message });
   }

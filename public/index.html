@@ -330,6 +330,28 @@
                   </form>
                   <div id="source-result" class="source-result"></div>
                 </div>
+                <div class="card panel" id="audit-panel">
+                  <header class="panel-head">
+                    <div><h3>Website audit</h3><p>Opens the lead's page and reports only what is actually there. Evidence, never guesses.</p></div>
+                    <span class="tag" id="audit-count">0 audited</span>
+                  </header>
+                  <div class="form-actions">
+                    <button class="btn btn-primary" type="button" id="btn-audit-batch">
+                      <svg class="ic"><use href="#i-sparkles" /></svg>Audit next 5 unaudited leads
+                    </button>
+                    <span class="muted xs" id="audit-status"></span>
+                  </div>
+                  <div class="audit-findings" id="audit-results"></div>
+                </div>
+
+                <div class="card panel" id="followup-panel">
+                  <header class="panel-head">
+                    <div><h3>Follow-ups due</h3><p>Day 3 and day 7, with the exact text. Nothing is sent for you.</p></div>
+                    <span class="tag" id="followup-count">0 due</span>
+                  </header>
+                  <div id="followup-list" class="audit-findings"></div>
+                </div>
+
                 <div class="card panel">
                   <header class="panel-head"><div><h3>Add leads manually</h3><p>Paste what you saw, one business per line.</p></div></header>
                   <form id="lead-form" class="form compact">
@@ -518,6 +540,25 @@
         </header>
         <div class="drawer-body" id="drawer-body"></div>
       </aside>
+    </div>
+
+    <!-- ── lock screen: only shown when OFFICE_ACCESS_CODE is set ── -->
+    <div class="lock-screen" id="lock-screen" hidden>
+      <form class="lock-card" id="lock-form">
+        <div class="lock-mark"><svg class="ic"><use href="#i-shield" /></svg></div>
+        <h2>This office is locked</h2>
+        <p class="muted">Enter the access code from <code>OFFICE_ACCESS_CODE</code> in your <code>.env</code>. It stays in this browser only.</p>
+        <label class="lock-field">
+          <span>Access code</span>
+          <input id="lock-code" name="code" type="password" autocomplete="current-password" placeholder="••••••••" required />
+        </label>
+        <p class="lock-error" id="lock-error" role="alert"></p>
+        <div class="lock-actions">
+          <button class="btn btn-primary" type="submit">Unlock</button>
+          <button class="btn btn-ghost" type="button" id="lock-exit">Forget code</button>
+        </div>
+        <p class="muted xs">Nothing runs without your approval — and nothing loads without this code when it is set.</p>
+      </form>
     </div>
 
     <div class="toast" id="toast" role="status" aria-live="polite"></div>

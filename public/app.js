@@ -81,14 +81,63 @@ function toast(message, tone = '') {
 
 /* ── api ───────────────────────────────────────────────────── */
 
+/* ── access code (only used when OFFICE_ACCESS_CODE is set) ── */
+const ACCESS_KEY = 'invincible.office.code';
+const getCode = () => localStorage.getItem(ACCESS_KEY) || '';
+const setCode = (value) => localStorage.setItem(ACCESS_KEY, value);
+const clearCode = () => localStorage.removeItem(ACCESS_KEY);
+
 async function api(path, options = {}) {
+  const code = getCode();
   const response = await fetch(path, {
-    headers: { 'content-type': 'application/json', ...(options.headers || {}) },
+    headers: {
+      'content-type': 'application/json',
+      ...(code ? { 'x-office-code': code } : {}),
+      ...(options.headers || {}),
+    },
     ...options,
   });
+
+  if (response.status === 401) {
+    // The server wants a code we do not have (or the wrong one).
+    showLock('Enter your access code to open this office.');
+    throw new Error('Locked — enter the access code.');
+  }
+
   const json = await response.json().catch(() => ({ ok: false, error: 'Unexpected server response' }));
   if (!response.ok) throw new Error(json.error || `Request failed (${response.status})`);
   return json;
+}
+
+/* ── lock screen ──────────────────────────────────────────── */
+function showLock(message = '') {
+  const node = $('#lock-screen');
+  if (!node) return;
+  node.hidden = false;
+  $('#lock-error').textContent = message;
+  setTimeout(() => $('#lock-code')?.focus(), 60);
+}
+
+function hideLock() {
+  const node = $('#lock-screen');
+  if (node) node.hidden = true;
+}
+
+async function unlockWith(value) {
+  const response = await fetch('/api/auth/login', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ code: value }),
+  });
+  const json = await response.json().catch(() => ({}));
+  if (!response.ok || !json.ok) {
+    $('#lock-error').textContent = json.error || 'That code did not work.';
+    return false;
+  }
+  setCode(value);
+  hideLock();
+  await refresh();
+  return true;
 }
 
 async function refresh() {
@@ -834,6 +883,72 @@ function renderFinder() {
 
   if (finderPlan) renderFinderPlan(finderPlan);
   renderSourceResults();
+  renderAuditPanel();
+  renderFollowUps();
+}
+
+/* ── website auditor + follow-ups ──────────────────────────── */
+
+function renderAuditPanel() {
+  const host = $('#audit-results');
+  if (!host) return;
+  const leads = (ui.state?.leads || []).filter((lead) => lead.audit);
+  $('#audit-count').textContent = `${leads.length} audited`;
+
+  if (!leads.length) {
+    host.innerHTML = `<div class="empty-state" style="padding:14px 4px"><span>No audits yet. Pick a lead below and press audit, or audit the next five in one go.</span></div>`;
+    return;
+  }
+
+  host.innerHTML = leads
+    .slice(0, 6)
+    .map((lead) => {
+      const findings = (lead.audit.findings || []).slice(0, 3);
+      return `<div class="audit-finding is-${esc(lead.audit.severity)}">
+        <b>${esc(lead.businessName)} · ${esc(lead.audit.severity)}</b>
+        <span class="evidence">${esc(lead.audit.finalUrl || lead.audit.url || 'no site')} · score ${lead.score}</span>
+        ${findings
+          .map(
+            (finding) => `<span class="evidence">• ${esc(finding.title)}${
+              finding.evidence ? ` — <i>${esc(finding.evidence.slice(0, 90))}</i>` : ''
+            }</span>`,
+          )
+          .join('')}
+        <div class="row-actions">
+          <button class="btn btn-sm btn-ghost" data-audit-lead="${esc(lead.id)}">Re-audit</button>
+          <button class="btn btn-sm btn-ghost" data-command="/outreach ${esc(lead.id)}">Draft outreach</button>
+          <button class="btn btn-sm btn-ghost" data-command="/sent ${esc(lead.id)}">Mark sent</button>
+        </div>
+      </div>`;
+    })
+    .join('');
+}
+
+function renderFollowUps() {
+  const host = $('#followup-list');
+  if (!host) return;
+  const queue = ui.state?.followups || [];
+  $('#followup-count').textContent = `${queue.length} due`;
+  if (!queue.length) {
+    host.innerHTML = `<div class="empty-state" style="padding:14px 4px"><span>No follow-ups due. Day 3 and day 7 appear here after you mark a message sent.</span></div>`;
+    return;
+  }
+  host.innerHTML = queue
+    .slice(0, 5)
+    .map(
+      (row) => `<div class="followup-item">
+        <header>
+          <b>Day ${row.step} · ${esc(row.name)}</b>
+          <span class="tag">${esc(row.channel)} · due ${esc(row.due)}</span>
+        </header>
+        <p>${esc(row.text)}</p>
+        <div class="row-actions">
+          <button class="btn btn-sm btn-ghost" data-copy-followup="${esc(row.id)}|${row.step}">Copy message</button>
+          <button class="btn btn-sm btn-primary" data-followup-sent="${esc(row.id)}|${row.step}|${esc(row.kind)}">Mark sent</button>
+        </div>
+      </div>`,
+    )
+    .join('');
 }
 
 function renderFinderPlan(plan) {
@@ -1747,6 +1862,67 @@ function confirmAction({ title, message, confirmLabel = 'Confirm', danger = fals
 /* ── events ────────────────────────────────────────────────── */
 
 function bindGlobal() {
+  /* ── website auditor + follow-ups ───────────────────────── */
+  $('#btn-audit-batch')?.addEventListener('click', async () => {
+    const btn = $('#btn-audit-batch');
+    const status = $('#audit-status');
+    btn.disabled = true;
+    status.textContent = 'Opening pages… this can take a few seconds.';
+    try {
+      const result = await mutate('/api/audit', { limit: 5, onlyUnverified: true }, { toastMessage: 'Audit finished' });
+      const rows = result.rows || [];
+      status.textContent = rows.length
+        ? `${rows.length} checked · ${rows.filter((r) => r.severity === 'high').length} with a high-severity gap`
+        : 'Nothing left to audit.';
+      renderAuditPanel();
+    } catch (error) {
+      status.textContent = error.message;
+      toast(error.message, 'bad');
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
+  document.addEventListener('click', async (event) => {
+    const single = event.target.closest('[data-audit-lead]');
+    if (single) {
+      single.disabled = true;
+      single.textContent = 'Opening…';
+      try {
+        await mutate('/api/audit', { id: single.dataset.auditLead }, { toastMessage: 'Audited' });
+        renderAuditPanel();
+      } catch (error) {
+        toast(error.message, 'bad');
+      } finally {
+        single.disabled = false;
+        single.textContent = 'Re-audit';
+      }
+      return;
+    }
+
+    const copyFollow = event.target.closest('[data-copy-followup]');
+    if (copyFollow) {
+      const [id, step] = copyFollow.dataset.copyFollowup.split('|');
+      const row = (ui.state?.followups || []).find((item) => item.id === id && String(item.step) === step);
+      if (row) {
+        await navigator.clipboard?.writeText(row.text).catch(() => {});
+        toast('Follow-up copied — send it yourself', 'good');
+      }
+      return;
+    }
+
+    const sent = event.target.closest('[data-followup-sent]');
+    if (sent) {
+      const [id, step, kind] = sent.dataset.followupSent.split('|');
+      try {
+        await mutate('/api/followups/sent', { kind, id, step: Number(step) }, { toastMessage: `Day ${step} recorded` });
+        renderFollowUps();
+      } catch (error) {
+        toast(error.message, 'bad');
+      }
+    }
+  });
+
   $('#nav').addEventListener('click', (event) => {
     const button = event.target.closest('.nav-item');
     if (button) setView(button.dataset.view);
@@ -2152,7 +2328,7 @@ function bindGlobal() {
       confirmLabel: 'Reset everything',
       onConfirm: async (values) => {
         if (String(values.confirm).trim() !== 'RESET') return toast('Type RESET to confirm.', 'bad'), false;
-        await mutate('/api/reset', { seed: false }, { toastMessage: 'Office reset.', tone: 'bad' });
+        await mutate('/api/reset', { confirm: 'DELETE EVERYTHING', seed: false }, { toastMessage: 'Office reset.', tone: 'bad' });
         return true;
       },
     });
@@ -2226,7 +2402,22 @@ function renderChips() {
     .join('');
 }
 
+function bindLock() {
+  $('#lock-form')?.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const value = $('#lock-code').value.trim();
+    if (!value) return;
+    const ok = await unlockWith(value);
+    if (!ok) $('#lock-code').select();
+  });
+  $('#lock-exit')?.addEventListener('click', () => {
+    clearCode();
+    showLock('Code forgotten. Enter it again.');
+  });
+}
+
 async function boot() {
+  bindLock();
   const fresh = await fetch('/healthz').then((r) => r.json()).catch(() => null);
   if (fresh?.name) {
     document.title = fresh.name;
