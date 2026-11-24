@@ -349,6 +349,57 @@ async function main() {
   html.includes('id="live-pill"') && html.includes('data-view="team"') && html.includes('id="btn-help"')
     ? pass('Console ships the live pill, the team view and page help')
     : fail('Console is missing the v2.3 affordances');
+
+  /* ── v2.3.1: keep the console from getting cluttered again ── */
+
+  // No page may open with more than three panels on screen; extra detail is
+  // allowed only inside a collapsed <details> block.
+  const dense = pages(html).filter((page) => page.visiblePanels > 3);
+  dense.length === 0
+    ? pass('No page opens with more than three panels')
+    : fail('Too many panels on first paint', dense.map((page) => `${page.view}:${page.visiblePanels}`).join(' '));
+
+  pages(html).every((page) => page.foldedPanels >= 0 && page.buttons <= 8)
+    ? pass('No page shows more than eight buttons at once')
+    : fail('A page is showing more than eight buttons', pages(html).map((page) => `${page.view}:${page.buttons}`).join(' '));
+
+  const navCount = (html.match(/class="nav-item/g) || []).length;
+  navCount <= 12
+    ? pass('Sidebar stays at a readable size', `${navCount} items in 4 groups`)
+    : fail('Sidebar grew again', `${navCount} items`);
+
+  // The old dashboard repeated approvals, follow-ups and agents in three boxes.
+  const duplicatePanels = ['approval-mini', 'agent-grid', 'dash-followup-list'].filter((id) => html.includes(`id="${id}"`));
+  duplicatePanels.length === 0
+    ? pass('The dashboard no longer repeats the same data in three boxes')
+    : fail('Duplicate dashboard panels came back', duplicatePanels.join(', '));
+}
+
+/** Per-page density, ignoring anything the user has to open first. */
+function pages(html) {
+  const out = [];
+  const sectionRe = /<section class="view[^"]*" data-view="([a-z]+)">/g;
+  const starts = [];
+  let match;
+  while ((match = sectionRe.exec(html))) starts.push({ view: match[1], start: match.index + match[0].length });
+  const count = (text, pattern) => (text.match(pattern) || []).length;
+  starts.forEach((entry, index) => {
+    const body = html.slice(entry.start, starts[index + 1]?.start ?? html.length);
+    const visible = body.replace(/<details[\s\S]*?<\/details>/g, '');
+
+    // Tabbed pages (Client Finder) show one pane at a time, so the honest number
+    // is the busiest single pane — not the sum of all four.
+    const panes = visible.split(/<div class="finder-grid finder-pane/).slice(1);
+    const panePanels = panes.length ? Math.max(...panes.map((pane) => count(pane, /class="card panel/g))) : null;
+
+    out.push({
+      view: entry.view,
+      visiblePanels: panePanels ?? count(visible, /class="card panel/g),
+      foldedPanels: count(body, /class="card panel/g) - count(visible, /class="card panel/g),
+      buttons: panes.length ? Math.max(...panes.map((pane) => count(pane, /<button/g))) : count(visible, /<button/g),
+    });
+  });
+  return out;
 }
 
 /**
