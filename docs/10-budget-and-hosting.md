@@ -1,5 +1,11 @@
 # Budget and hosting
 
+> **v2.2 note — n8n and Google Sheets were removed.** They were never referenced by
+> the code, and the built-in scheduler + follow-up engine now do that job. Any `n8n` or
+> Sheets instruction below is **legacy from the original guide** — you do not need it, and
+> nothing in the app depends on it. See `docs/15-what-changed-v2.1.md`.
+
+
 A ₹0 **software** starting cost is possible: self-hosted n8n, local Ollama, free Google
 Sheets, free Telegram Bot API. It is not a ₹0 **total** cost — electricity, internet,
 storage and your time are real. Hosted AI and cloud servers add ongoing charges.

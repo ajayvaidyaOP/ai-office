@@ -1,5 +1,11 @@
 # Start here — your AI Invincible Office
 
+> **v2.2 note — n8n and Google Sheets were removed.** They were never referenced by
+> the code, and the built-in scheduler + follow-up engine now do that job. Any `n8n` or
+> Sheets instruction below is **legacy from the original guide** — you do not need it, and
+> nothing in the app depends on it. See `docs/15-what-changed-v2.1.md`.
+
+
 This repository is a **working, runnable version** of the *Build Your Own AI Invincible Office* guide.
 It implements the guide's first prototype end to end, plus the pieces you need to grow it:
 

@@ -477,13 +477,8 @@
                 <div class="divider"></div>
                 <h4 class="mini-head">Deployment checklist</h4>
                 <ul class="checklist" id="deploy-list">
-                  <li>Engine reachable (Ollama running or a Gemini key set)</li>
-                  <li>Telegram token stored only in credentials</li>
-                  <li>Only your Telegram user ID can trigger workflows</li>
-                  <li>AI output validated before it is stored</li>
-                  <li>Every draft needs Approve / Revise / Reject</li>
-                  <li>No workflow publishes, spends or deletes on its own</li>
-                  <li>Backups running weekly</li>
+                  <!-- Filled by renderDeployChecklist() from REAL state, not hardcoded. -->
+                  <li class="muted">Checking…</li>
                 </ul>
               </div>
 

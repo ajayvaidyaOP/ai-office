@@ -1225,7 +1225,6 @@ function renderSetup() {
     ['Gemini API key', secrets.geminiKey ? 'set' : 'optional', secrets.geminiKey],
     ['Google Places key', secrets.placesApiKey ? 'set — live lead search' : 'optional — OSM is free', secrets.placesApiKey],
     ['Webhook secret', secrets.webhookSecret ? 'set' : 'optional', secrets.webhookSecret],
-    ['Google Sheet ID', secrets.googleSheetId ? 'set' : 'CSV export available', secrets.googleSheetId],
   ];
   $('#secret-list').innerHTML = rows
     .map(
@@ -1245,6 +1244,89 @@ function renderSetup() {
       ([label, value, ok]) =>
         `<li><span class="mark ${ok ? 'mark-yes' : 'mark-no'}">${ok ? '✓' : '–'}</span><span><b>${esc(label)}</b><br>${esc(value)}</span></li>`,
     )
+    .join('');
+
+  renderDeployChecklist();
+}
+
+/**
+ * Deployment checklist driven by REAL state.
+ * Previously these were seven hardcoded <li> items, so the page said
+ * "Engine reachable" even when the engine was down. Each row below is
+ * computed from the state the server just returned.
+ */
+function renderDeployChecklist() {
+  const host = $('#deploy-list');
+  if (!host) return;
+  const state = ui.state || {};
+  const secrets = state.secrets || {};
+  const provider = state.provider || {};
+  const settings = state.meta?.settings || {};
+  const tg = state.telegram || {};
+  const scheduler = state.scheduler || {};
+  const lastBackup = state.meta?.lastBackupAt || null;
+  const leadCount = (state.leads || []).length;
+  const audited = (state.leads || []).filter((lead) => lead.audit).length;
+
+  const engineUp = Boolean(provider.ollama?.reachable || provider.gemini?.configured);
+  const backupAgeDays = lastBackup
+    ? Math.floor((Date.now() - new Date(lastBackup).getTime()) / 86_400_000)
+    : null;
+  const backupFresh = backupAgeDays !== null && backupAgeDays <= 14;
+
+  const rows = [
+    [
+      engineUp ? 'AI engine reachable' : 'AI engine: offline rules only',
+      engineUp ? 'Ollama or Gemini is answering.' : 'No model configured — drafts use the built-in rules engine. Fine, but blunter.',
+      engineUp,
+      false,
+    ],
+    [
+      secrets.accessCode ? 'Console is locked' : 'Console is NOT locked',
+      secrets.accessCode
+        ? 'OFFICE_ACCESS_CODE is set; the dashboard asks for it.'
+        : 'Anyone who can reach this port can read and change your office.',
+      Boolean(secrets.accessCode),
+      true,
+    ],
+    [
+      tg.configured ? 'Telegram connected' : 'Telegram not connected',
+      tg.configured ? `mode: ${tg.mode || 'off'}` : 'Optional. The daily brief can post to your own chat only.',
+      Boolean(tg.configured),
+      false,
+    ],
+    [
+      scheduler.enabled ? `Daily brief at ${String(scheduler.hour ?? 9).padStart(2, '0')}:${String(scheduler.minute ?? 0).padStart(2, '0')}` : 'Scheduler is off',
+      scheduler.enabled ? 'Brief + follow-up queue are built in — no n8n needed.' : 'Set SCHEDULER=on to get a morning brief.',
+      Boolean(scheduler.enabled),
+      false,
+    ],
+    [
+      backupFresh ? `Backup ${backupAgeDays}d old` : lastBackup ? `Backup is ${backupAgeDays}d old` : 'No backup yet',
+      backupFresh ? 'Recent enough. Copy it off this machine.' : 'Run npm run backup — the database lives in one file.',
+      backupFresh,
+      true,
+    ],
+    [
+      leadCount ? `${audited}/${leadCount} leads audited` : 'No leads yet',
+      leadCount ? 'Audit before outreach: /audit-all' : 'Import real businesses from the Client Finder.',
+      leadCount > 0 && audited > 0,
+      true,
+    ],
+    [
+      'Approval gate active',
+      'Every draft waits for Approve / Revise / Reject. Nothing sends itself.',
+      true,
+      false,
+    ],
+  ];
+
+  host.innerHTML = rows
+    .map(([label, detail, ok, important]) => {
+      const tone = ok ? 'mark-yes' : important ? 'mark-no' : 'mark-no';
+      const suffix = !ok && important ? ' <b class="xs">(fix this)</b>' : '';
+      return `<li><span class="mark ${tone}">${ok ? '✓' : '–'}</span><span><b>${esc(label)}</b>${suffix}<br><span class="muted xs">${esc(detail)}</span></span></li>`;
+    })
     .join('');
 }
 

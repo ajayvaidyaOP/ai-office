@@ -1,5 +1,11 @@
 # Install — Docker, n8n, Ollama, Telegram
 
+> **v2.2 note — n8n and Google Sheets were removed.** They were never referenced by
+> the code, and the built-in scheduler + follow-up engine now do that job. Any `n8n` or
+> Sheets instruction below is **legacy from the original guide** — you do not need it, and
+> nothing in the app depends on it. See `docs/15-what-changed-v2.1.md`.
+
+
 Everything here maps to Chapter 3 of the guide. You do **not** need all of it to start:
 `npm start` runs the office on its own.
 

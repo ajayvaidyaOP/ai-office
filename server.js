@@ -346,6 +346,10 @@ async function route(req, res, url) {
     return action(async () => runMorningRoutine({ reason: 'manual' }))(req, res, {});
   }
 
+  if (pathname === '/api/evidence' && method === 'POST') {
+    return action(async (body) => office.collectEvidence(body.id, body.actor || 'owner'))(req, res, await readBody(req));
+  }
+
   /* ── Follow-ups ──────────────────────────────────────────── */
   if (pathname === '/api/followups' && method === 'GET') {
     return sendJson(res, 200, { ok: true, queue: office.followUpQueue() });

@@ -1,5 +1,11 @@
 # Daily operations — run it like a small team
 
+> **v2.2 note — n8n and Google Sheets were removed.** They were never referenced by
+> the code, and the built-in scheduler + follow-up engine now do that job. Any `n8n` or
+> Sheets instruction below is **legacy from the original guide** — you do not need it, and
+> nothing in the app depends on it. See `docs/15-what-changed-v2.1.md`.
+
+
 A short morning brief, a review session for drafts and leads, an end-of-day summary.
 The whole point is to remove coordination work, not to add a second job.
 

@@ -1,5 +1,11 @@
 # Beginner-to-advanced roadmap
 
+> **v2.2 note — n8n and Google Sheets were removed.** They were never referenced by
+> the code, and the built-in scheduler + follow-up engine now do that job. Any `n8n` or
+> Sheets instruction below is **legacy from the original guide** — you do not need it, and
+> nothing in the app depends on it. See `docs/15-what-changed-v2.1.md`.
+
+
 Six levels. The rule for every level: **add one capability only after the previous one works
 reliably for at least a week.**
 

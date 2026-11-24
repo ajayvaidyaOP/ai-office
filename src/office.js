@@ -18,7 +18,7 @@ import {
 } from './agents/index.js';
 import { sourceLeads, sourcingStatus } from './agents/sourcing.js';
 import { extractIds, LEAD_STAGES, offlineBrief, offlineProposal } from './agents/offline.js';
-import { auditLead, auditSummary, summarise } from './agents/auditor.js';
+import { auditLead, auditSummary, summarise, harvestEvidence, evidenceLine } from './agents/auditor.js';
 
 export const COMMANDS = [
   { command: '/task', group: 'Work', description: 'Plan the work you describe into 1-5 tasks', example: '/task Plan a Reel about free AI tools' },
@@ -38,6 +38,7 @@ export const COMMANDS = [
   { command: '/proposal', group: 'Clients', description: 'Draft a proposal for a client', example: '/proposal C-0002' },
   { command: '/audit', group: 'Clients', description: 'Open a lead’s website and list what is actually broken', example: '/audit L-0007' },
   { command: '/audit-all', group: 'Clients', description: 'Audit up to 5 unverified leads in one go', example: '/audit-all 5' },
+  { command: '/evidence', group: 'Clients', description: 'Quote the exact broken text from their own page (proof for the DM)', example: '/evidence L-0007' },
   { command: '/sent', group: 'Clients', description: 'Mark a lead’s first message as sent by hand (starts the day-3 clock)', example: '/sent L-0007' },
   { command: '/followups', group: 'Clients', description: 'Who is due a day-3 or day-7 follow-up, with the exact text', example: '/followups' },
   { command: '/followup-sent', group: 'Clients', description: 'Mark a follow-up as sent by hand', example: '/followup-sent L-0007 3' },
@@ -682,6 +683,22 @@ export async function auditOneLead(id, actor = 'owner', { respectVerification = 
   return { lead, audit: lead.audit };
 }
 
+/** Harvest quotable proof from a lead's live page (verbatim strings only). */
+export async function collectEvidence(id, actor = 'owner') {
+  const lead = store.db.leads.find((row) => row.id === String(id || '').toUpperCase());
+  if (!lead) throw new Error(`Lead ${id} not found.`);
+  const evidence = await harvestEvidence(lead.website || lead.sourceUrl || '');
+  lead.evidence = evidence;
+  lead.evidenceLine = evidenceLine(evidence);
+  store.save();
+  store.audit('lead.evidence_harvested', {
+    actor,
+    ref: lead.id,
+    detail: evidence.ok ? `${evidence.quotes.length} quote(s) captured` : `not captured: ${evidence.reason}`,
+  });
+  return { lead, evidence };
+}
+
 /**
  * Audit a batch. Bounded on purpose: this hits other people's servers,
  * so we are gentle by default and never unbounded.
@@ -975,6 +992,8 @@ export async function handleCommand({ raw = '', actor = 'owner', channel = 'web'
       return commandStage(rest, actor);
     case '/audit':
       return commandAudit(rest, actor);
+    case '/evidence':
+      return commandEvidence(rest, actor);
     case '/audit-all':
       return commandAuditAll(rest, actor);
     case '/sent':
@@ -1414,6 +1433,39 @@ async function commandAudit(rest, actor) {
     return reply({
       text: lines.join('\n'),
       buttons: [{ label: 'Draft outreach', command: `/outreach ${lead.id}`, tone: 'good' }],
+      ref: lead.id,
+    });
+  } catch (error) {
+    return reply({ text: error.message });
+  }
+}
+
+async function commandEvidence(rest, actor) {
+  const ids = extractIds(rest, 'lead');
+  if (!ids.length) return reply({ text: 'Usage: /evidence L-0007 — pulls the exact strings from their page so you can quote them.' });
+  try {
+    const { lead, evidence } = await collectEvidence(ids[0], actor);
+    if (!evidence.ok) {
+      return reply({
+        text: [
+          `📵 EVIDENCE — ${lead.businessName} (${lead.id})`,
+          '',
+          `Could not capture proof: ${evidence.reason}`,
+          '',
+          'Nothing was invented and nothing was saved as evidence. Run this again from a machine that can open the page.',
+        ].join('\n'),
+      });
+    }
+    const lines = [`📋 EVIDENCE — ${lead.businessName} (${lead.id})`, `Source: ${evidence.url}`, ''];
+    evidence.quotes.forEach((quote, index) => {
+      lines.push(`${index + 1}. ${quote.label}`);
+      lines.push(`   "${quote.quote}"`);
+    });
+    lines.push('', 'Every line above is verbatim from their own page. Paste one into the DM as proof.');
+    lines.push(`Next: /outreach ${lead.id}`);
+    return reply({
+      text: lines.join('\n'),
+      buttons: [{ label: 'Copy first quote', command: evidence.quotes[0]?.quote || '', tone: 'neutral' }],
       ref: lead.id,
     });
   } catch (error) {

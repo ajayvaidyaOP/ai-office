@@ -137,9 +137,6 @@ export function startTelegramPolling() {
   return { started: true, mode: 'polling' };
 }
 
-export function stopTelegramPolling() {
-  polling = null;
-}
 
 export const telegramStatus = () => ({
   configured: Boolean(config.telegram.botToken),

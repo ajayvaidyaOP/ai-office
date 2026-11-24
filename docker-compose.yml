@@ -1,45 +1,18 @@
-# AI Invincible Office — local stack (Chapter 3 of the guide)
+# AI Invincible Office — container stack
 #
-#   docker compose up -d n8n        # n8n only
-#   docker compose up -d            # n8n + this office in a container
+#   docker compose up -d          # this office only
+#   docker compose logs -f office # follow the log
+#
+# Scheduling, Telegram and the morning brief are all built into the app now,
+# so no n8n container is needed. (n8n was removed in v2.2 — it was never
+# referenced by the code and duplicated the built-in scheduler.)
 #
 # Ollama is expected on the HOST (simplest, and it can use your GPU):
 #   https://ollama.com/download  →  ollama pull llama3.2
 #
-# Linux: host.docker.internal is mapped with extra_hosts below.
+# Linux/Windows: host.docker.internal is mapped with extra_hosts below.
 
 services:
-  n8n:
-    image: docker.n8n.io/n8nio/n8n
-    container_name: ai-office-n8n
-    restart: unless-stopped
-    ports:
-      - "0.0.0.0:5678:5678"
-    environment:
-      - N8N_HOST=0.0.0.0
-      - N8N_PORT=5678
-      - N8N_PROTOCOL=http
-      # Change this to your preview host / real domain in production.
-      - WEBHOOK_URL=${N8N_WEBHOOK_URL:-http://localhost:5678/}
-      # Generate with: openssl rand -hex 32
-      - N8N_ENCRYPTION_KEY=${N8N_ENCRYPTION_KEY:-change-me-please-use-a-random-value}
-      - N8N_SECURE_COOKIE=false
-      - GENERIC_TIMEZONE=${OFFICE_TIMEZONE:-Asia/Kolkata}
-      - TZ=${OFFICE_TIMEZONE:-Asia/Kolkata}
-      - N8N_DIAGNOSTICS_ENABLED=false
-      - N8N_RUNNERS_ENABLED=true
-    volumes:
-      - n8n_data:/home/node/.n8n
-      - ./n8n/workflows:/workflows:ro
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    healthcheck:
-      test: ["CMD-SHELL", "wget -q --spider http://localhost:5678/healthz || exit 1"]
-      interval: 30s
-      timeout: 5s
-      retries: 5
-      start_period: 40s
-
   office:
     build:
       context: .
@@ -62,19 +35,26 @@ services:
       - GEMINI_MODEL=${GEMINI_MODEL:-gemini-2.0-flash}
       - MAX_MODEL_CALLS_PER_DAY=${MAX_MODEL_CALLS_PER_DAY:-200}
       - ALLOWED_USER_IDS=${ALLOWED_USER_IDS:-owner}
+      # Set this if the port is reachable from anywhere but your own machine.
+      - OFFICE_ACCESS_CODE=${OFFICE_ACCESS_CODE:-}
+      # Telegram is optional: it only ever talks to YOUR chat id.
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
+      - TELEGRAM_OWNER_CHAT_ID=${TELEGRAM_OWNER_CHAT_ID:-}
       - ALLOWED_TELEGRAM_USER_IDS=${ALLOWED_TELEGRAM_USER_IDS:-owner}
       - TELEGRAM_MODE=${TELEGRAM_MODE:-off}
       - WEBHOOK_SECRET=${WEBHOOK_SECRET:-}
-      - OFFICE_ACCESS_CODE=${OFFICE_ACCESS_CODE:-}
+      # Built-in daily brief + follow-up queue (replaces the n8n cron).
+      - SCHEDULER=${SCHEDULER:-on}
+      - SCHEDULER_HOUR=${SCHEDULER_HOUR:-9}
+      - SCHEDULER_MINUTE=${SCHEDULER_MINUTE:-0}
     volumes:
+      # Your database lives here. Back it up: npm run backup
       - ./data:/data
     extra_hosts:
       - "host.docker.internal:host-gateway"
-    depends_on:
-      n8n:
-        condition: service_started
-
-volumes:
-  n8n_data:
-    name: ai-office-n8n-data
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:3000/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
