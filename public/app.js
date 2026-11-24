@@ -201,6 +201,7 @@ const STAGE_TONE = {
   Verified: 'cyan',
   Contacted: 'violet',
   Replied: 'amber',
+  Client: 'lime',
 };
 const stageTag = (stage) => `<span class="tag tag-${STAGE_TONE[stage] || ''}">${esc(stage)}</span>`;
 
@@ -289,6 +290,16 @@ function renderDashboard() {
     .map((item) => `<li><span class="dot" style="background:${item.tone}"></span>${esc(item.label)}</li>`)
     .join('');
 
+  const todayKey = (state.meta?.today || new Date().toISOString()).slice(0, 10);
+  const retainerClients = (state.clients || []).filter((client) => client.recurring && client.recurringAmount);
+  const retainerMonthly = Math.round(
+    retainerClients.reduce(
+      (sum, client) => sum + Number(client.recurringAmount) / ({ monthly: 1, quarterly: 3, yearly: 12 }[client.recurring] || 1),
+      0,
+    ),
+  );
+  const dueInvoices = retainerClients.filter((client) => client.nextInvoiceAt && client.nextInvoiceAt <= todayKey).length;
+
   const kpis = [
     {
       label: 'Awaiting approval',
@@ -316,11 +327,18 @@ function renderDashboard() {
     },
     {
       label: 'Clients',
+      /*
+       * Once a retainer exists, the same card carries the number that actually
+       * matters — monthly money — instead of adding a fifth KPI box. Fold, do
+       * not add a panel.
+       */
       value: o.clients.total,
       icon: 'briefcase',
       accent: '#a3e635',
       soft: 'rgba(163,230,53,0.13)',
-      foot: `${o.leads.needsVerification} lead${o.leads.needsVerification === 1 ? '' : 's'} need verification`,
+      foot: retainerMonthly
+        ? `${inr(retainerMonthly)}/month on retainer · ${dueInvoices} invoice${dueInvoices === 1 ? '' : 's'} due`
+        : `${o.leads.needsVerification} lead${o.leads.needsVerification === 1 ? '' : 's'} need verification`,
     },
   ];
 
@@ -646,6 +664,7 @@ function renderTasks() {
                 <span class="mono">${esc(task.id)}</span>
                 ${priorityTag(task.priority)}
                 <span>${esc(task.owner)}</span>
+                ${task.client ? `<span class="tag tag-cyan">${esc(task.client)}</span>` : ''}
                 ${task.deadline ? `<span style="${overdue ? 'color:#fb7185' : ''}">${esc(task.deadline)} · ${esc(due)}</span>` : '<span>no deadline</span>'}
                 ${task.status === 'Blocked' ? `<span style="color:#fb7185">blocked${task.notes ? `: ${esc(task.notes.slice(0, 40))}` : ''}</span>` : ''}
               </div>
@@ -836,7 +855,8 @@ function renderClients() {
                   (client) => `<div class="client-card" data-client="${esc(client.id)}">
                     <b>${esc(client.company)}</b>
                     <div class="cc-meta"><span>${esc(client.contact || 'Owner')}</span><span>${esc(client.niche || '')}</span></div>
-                    <div class="cc-value">${inr(client.value)}</div>
+                    <div class="cc-value">${inr(client.value)}${client.recurring ? `<span class="cc-recur">· ${esc(client.recurring)}</span>` : ''}</div>
+                    ${client.recurring && client.nextInvoiceAt ? `<div class="cc-next">invoice ${esc(client.nextInvoiceAt)}</div>` : ''}
                     ${client.nextFollowUp ? `<div class="cc-next">follow-up ${esc(dueLabel(client.nextFollowUp))}</div>` : ''}
                   </div>`,
                 )

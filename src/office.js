@@ -21,7 +21,7 @@ import { extractIds, LEAD_STAGES, offlineBrief, offlineProposal } from './agents
 import { auditLead, auditSummary, summarise, harvestEvidence, evidenceLine } from './agents/auditor.js';
 
 export const COMMANDS = [
-  { command: '/task', group: 'Work', description: 'Plan the work you describe into 1-5 tasks', example: '/task Plan a Reel about free AI tools' },
+  { command: '/task', group: 'Work', description: 'Plan the work you describe into 1-5 tasks — pass a C-xxxx to bill it to a client', example: '/task for C-0002 Write three Reels' },
   { command: '/draft', group: 'Work', description: 'Create one draft and send it for approval', example: '/draft Write a friendly Instagram caption' },
   { command: '/brief', group: 'Work', description: 'Your morning brief: focus, waiting on you, money', example: '/brief' },
   { command: '/report', group: 'Work', description: 'Daily office summary from stored data', example: '/report' },
@@ -39,10 +39,13 @@ export const COMMANDS = [
   { command: '/audit', group: 'Clients', description: 'Open a lead’s website and list what is actually broken', example: '/audit L-0007' },
   { command: '/audit-all', group: 'Clients', description: 'Audit up to 5 unverified leads in one go', example: '/audit-all 5' },
   { command: '/evidence', group: 'Clients', description: 'Quote the exact broken text from their own page (proof for the DM)', example: '/evidence L-0007' },
-  { command: '/sent', group: 'Clients', description: 'Mark a lead’s first message as sent by hand (starts the day-3 clock)', example: '/sent L-0007' },
+  { command: '/sent', group: 'Clients', description: 'Mark a message as sent by hand — a lead’s first DM or a client’s proposal (starts the day-3 clock)', example: '/sent L-0007 or /sent C-0002' },
   { command: '/followups', group: 'Clients', description: 'Who is due a day-3 or day-7 follow-up, with the exact text', example: '/followups' },
   { command: '/followup-sent', group: 'Clients', description: 'Mark a follow-up as sent by hand', example: '/followup-sent L-0007 3' },
   { command: '/clients', group: 'Clients', description: 'List clients and open pipeline', example: '/clients' },
+  { command: '/retainer', group: 'Clients', description: 'Put a client on a retainer — amount, cycle, next invoice date', example: '/retainer C-0002 15000 monthly' },
+  { command: '/invoice', group: 'Clients', description: 'Log that this month’s invoice went out and roll the date forward', example: '/invoice C-0002' },
+  { command: '/money', group: 'Clients', description: 'What is invoiced, what is due, and what is still open this month', example: '/money' },
   { command: '/done', group: 'Tasks', description: 'Mark a task done', example: '/done T-0001' },
   { command: '/progress', group: 'Tasks', description: 'Move a task to In Progress', example: '/progress T-0001' },
   { command: '/block', group: 'Tasks', description: 'Mark a task blocked with a reason', example: '/block T-0001 Waiting on client' },
@@ -129,9 +132,19 @@ const money = (value) => `₹${Number(value || 0).toLocaleString('en-IN')}`;
    ACTIONS — shared by the command layer, the HTTP API and the UI
    ══════════════════════════════════════════════════════════════ */
 
-export async function createTasks(request, actor = 'owner') {
+export async function createTasks(request, actor = 'owner', clientId = '') {
   const clean = normalise(request);
   if (!clean) throw new Error('Describe the work you want planned.');
+  /*
+   * A task with no client is a task you cannot bill for. Before this every task
+   * was anonymous, so "what did I do for Cakecstacy this month" had no answer
+   * and a retainer's profitability could not be worked out. Optional, because
+   * admin work is genuinely clientless.
+   */
+  const linkedClient = clientId
+    ? store.db.clients.find((row) => row.id === String(clientId).toUpperCase())
+    : null;
+  if (clientId && !linkedClient) throw new Error(`Client ${clientId} not found.`);
 
   const result = await runManager(clean, {});
   const createdAt = new Date().toISOString();
@@ -149,6 +162,8 @@ export async function createTasks(request, actor = 'owner') {
       provider: result.provider,
       needsReview: Boolean(result.needsReview),
       source: actor,
+      clientId: linkedClient?.id || '',
+      client: linkedClient?.company || '',
     };
     store.db.tasks.push(row);
     return row;
@@ -311,7 +326,34 @@ export async function decideDraft({ id, decision, feedback = '' }, actor = 'owne
     draft.history.push({ at: draft.decisionAt, action: 'approve', actor, note });
     store.save();
     store.audit('draft.approved', { actor, ref: draft.id, detail: note || 'approved without note' });
-    return { draft, approved: true };
+
+    /*
+     * Approving a proposal is the moment the pipeline moves. Before this, the
+     * draft said Approved while the client sat at 'Lead' forever, so the board
+     * never showed that a proposal had gone out and the follow-up engine had no
+     * start date to chase it from.
+     *
+     * Approving a draft is still NOT sending it — that stays manual. So we only
+     * record that the proposal is written and approved, and move the stage.
+     */
+    let movedStage = '';
+    if (draft.kind === 'proposal' && draft.clientId) {
+      const client = store.db.clients.find((row) => row.id === draft.clientId);
+      if (client && ['Lead', 'Proposal sent'].includes(client.stage)) {
+        movedStage = client.stage === 'Lead' ? 'Proposal sent' : '';
+        if (movedStage) {
+          client.stage = movedStage;
+          // No proposalSentAt on purpose: /sent C-xxxx is the proof it went out.
+          store.save();
+          store.audit('client.stage', {
+            actor,
+            ref: client.id,
+            detail: `Proposal sent — approved ${draft.id}`,
+          });
+        }
+      }
+    }
+    return { draft, approved: true, movedStage };
   }
 
   if (decision === 'reject') {
@@ -636,18 +678,38 @@ export function promoteLead(id, actor = 'owner') {
     },
     actor,
   );
-  lead.clientId = client.id;
+
   /*
-   * Promoting is a data move, not a sale. Marking the lead Won used to inflate
-   * the pipeline's win rate and won-value the moment you created the client
-   * record. The deal is won when the CLIENT stage says so.
+   * Carry the lead's history across. Before this, promoting threw away the fact
+   * that you had already messaged them: the follow-up clock reset to today, so
+   * a lead you chased 20 days ago started day 1 again, and the day-3/7 chase
+   * silently disappeared from the queue.
    */
-  lead.stage = 'Won';
-  lead.stageReason = 'promoted to client record — deal value lives on the client';
+  client.sentAt = lead.sentAt || null;
+  client.channel = lead.channel || '';
+  /*
+   * lastTouchAt is deliberately NOT carried over. The client follow-up queue
+   * measures from proposalSentAt || lastTouchAt, so copying the lead's date here
+   * would start a "proposal sent 3 days ago" chase for a proposal nobody wrote.
+   */
+
+  lead.clientId = client.id;
   lead.contactStatus = 'Client';
   lead.nextFollowUp = null;
+  /*
+   * Promoting is a data move, not a sale. The old code set this to 'Won', which
+   * inflated win rate and won value the moment a client record existed, so the
+   * lead is marked as handed over instead. Its deal value now lives on the
+   * client, where the pipeline reads it.
+   */
+  lead.stage = 'Client';
+  lead.stageReason = `handed over to ${client.id} — the deal is tracked on the client record`;
   store.save();
-  store.audit('lead.promoted', { actor, ref: client.id, detail: `${lead.id} → ${client.id}` });
+  store.audit('lead.promoted', {
+    actor,
+    ref: client.id,
+    detail: `${lead.id} → ${client.id}${client.sentAt ? ' · send history carried across' : ''}`,
+  });
   return { lead, client };
 }
 
@@ -664,6 +726,65 @@ export function setClientStage(id, stage, actor = 'owner') {
   store.save();
   store.audit('client.stage', { actor, ref: client.id, detail: `${target} — ${client.company}` });
   return { client };
+}
+
+/**
+ * Put a client on a retainer — the only thing that makes an agency repeatable.
+ *
+ * Before this a client had one `value` and no sense of time, so the app could
+ * not answer "who owes me money this month" or "is this retainer still worth
+ * keeping". A retainer sets the recurring amount, the cycle, and the next
+ * invoice date, and marks the deal Won because a retainer is a signed deal.
+ */
+export const RETAINER_CYCLES = ['monthly', 'quarterly', 'yearly'];
+
+export function setRetainer(id, { amount, cycle = 'monthly', startDate = '' } = {}, actor = 'owner') {
+  const client = store.db.clients.find((row) => row.id === String(id || '').toUpperCase());
+  if (!client) throw new Error(`Client ${id} not found.`);
+  const resolved = RETAINER_CYCLES.find((item) => item === String(cycle || '').toLowerCase());
+  if (!resolved) throw new Error(`Cycle must be one of: ${RETAINER_CYCLES.join(', ')}.`);
+  const money = Math.max(0, Number(amount) || 0);
+  if (!money) throw new Error('A retainer needs a monthly amount.');
+
+  const months = { monthly: 1, quarterly: 3, yearly: 12 }[resolved];
+  const start = startDate || todayKey();
+  const next = addMonths(start, months);
+
+  client.stage = 'Won';
+  client.value = money;
+  client.recurring = resolved;
+  client.recurringAmount = money;
+  client.retainerStartAt = start;
+  /*
+   * The first invoice is due when the retainer starts, not a month later.
+   * Otherwise signing a client today hides the work "who do I invoice now?"
+   * behind a date in the future and /money reports nothing due.
+   */
+  client.nextInvoiceAt = client.invoices?.length ? next : start;
+  client.nextFollowUp = null;
+  client.lastTouchAt = new Date().toISOString();
+  store.save();
+  store.audit('client.retainer', {
+    actor,
+    ref: client.id,
+    detail: `${money} ${resolved} · next invoice ${next}`,
+  });
+  return { client };
+}
+
+/** Log that an invoice went out and roll the retainer to the next cycle. */
+export function markInvoiceSent(id, actor = 'owner') {
+  const client = store.db.clients.find((row) => row.id === String(id || '').toUpperCase());
+  if (!client) throw new Error(`Client ${id} not found.`);
+  if (!client.recurring) throw new Error(`${client.id} is not on a retainer — set one with /retainer ${client.id} 15000 monthly.`);
+  const months = { monthly: 1, quarterly: 3, yearly: 12 }[client.recurring] || 1;
+  const invoiced = client.nextInvoiceAt || todayKey();
+  client.lastInvoiceAt = invoiced;
+  client.invoices = [...(client.invoices || []), { at: invoiced, amount: client.recurringAmount, cycle: client.recurring }];
+  client.nextInvoiceAt = addMonths(invoiced, months);
+  store.save();
+  store.audit('client.invoiced', { actor, ref: client.id, detail: `${invoiced} · ${client.recurringAmount} ${client.recurring}` });
+  return { client, invoiced };
 }
 
 /* ═══════════════════════════════════════════════════════════════
@@ -798,6 +919,17 @@ export async function auditLeads({ ids = [], limit = 5, onlyUnverified = false }
 const DAY = 86_400_000;
 const addDays = (iso, days) => new Date(new Date(iso).getTime() + days * DAY).toISOString().slice(0, 10);
 
+/** Calendar-month maths that does not drift: 31 Jan + 1 month is 28/29 Feb. */
+const addMonths = (iso, months) => {
+  const date = new Date(iso);
+  const day = date.getUTCDate();
+  date.setUTCDate(1);
+  date.setUTCMonth(date.getUTCMonth() + months);
+  const lastDay = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + 1, 0)).getUTCDate();
+  date.setUTCDate(Math.min(day, lastDay));
+  return date.toISOString().slice(0, 10);
+};
+
 export function followUpTemplates({ name, problem = '', businessName = '' }) {
   const who = name || 'there';
   return {
@@ -880,6 +1012,35 @@ export function markLeadSent({ id, channel = '' }, actor = 'owner') {
   store.save();
   store.audit('lead.sent_manual', { actor, ref: lead.id, detail: `first message sent by hand · ${channel || 'unspecified channel'}` });
   return { lead };
+}
+
+/**
+ * Mark a proposal as actually sent to the client.
+ *
+ * This was the missing arrow. `proposalSentAt` was read by the follow-up queue
+ * (metrics.js) but never written anywhere, so approving a proposal moved it to
+ * 'Proposal sent' and then nothing was ever due. Approving is not sending — the
+ * human still sends by hand — so this is a separate, explicit step.
+ */
+export function markProposalSent({ id, channel = 'Email' }, actor = 'owner') {
+  const client = store.db.clients.find((row) => row.id === String(id || '').toUpperCase());
+  if (!client) throw new Error(`Client ${id} not found.`);
+  if (!['Lead', 'Proposal sent', 'Negotiation'].includes(client.stage)) {
+    throw new Error(`${client.id} is ${client.stage} — there is no proposal to send.`);
+  }
+  const now = new Date().toISOString();
+  const first = !client.proposalSentAt;
+  client.proposalSentAt = client.proposalSentAt || now;
+  client.lastTouchAt = now;
+  client.nextFollowUp = null;
+  if (client.stage === 'Lead') client.stage = 'Proposal sent';
+  store.save();
+  store.audit('client.proposal_sent', {
+    actor,
+    ref: client.id,
+    detail: `${first ? 'proposal sent by hand' : 'proposal re-sent'} · ${channel}`,
+  });
+  return { client };
 }
 
 export function setFollowUp({ kind, id, date }, actor = 'owner') {
@@ -1072,6 +1233,12 @@ export async function handleCommand({ raw = '', actor = 'owner', channel = 'web'
       return commandProposal(rest, actor);
     case '/clients':
       return commandClients(actor);
+    case '/retainer':
+      return commandRetainer(rest, actor);
+    case '/invoice':
+      return commandInvoice(rest, actor);
+    case '/money':
+      return commandMoney(actor);
     case '/client':
       return commandClient(rest);
     case '/followup':
@@ -1092,17 +1259,22 @@ export async function handleCommand({ raw = '', actor = 'owner', channel = 'web'
 }
 
 async function commandTask(request, actor) {
-  const clean = normalise(request);
+  /*
+   * /task for C-0005 Make three Reels — the C-xxxx is stripped out of the work
+   * description and used as the owner client, so the task is attributable.
+   */
+  const clientIds = extractIds(request, 'client');
+  const clean = normalise(clientIds.length ? String(request).replace(/C-\d{4}/gi, '') : request);
   if (!clean) {
-    return reply({ text: 'Usage: /task Describe the work you want planned.\nExample: /task Plan a beginner-friendly Instagram Reel about free AI tools.' });
+    return reply({ text: 'Usage: /task Describe the work you want planned.\nExample: /task Plan a beginner-friendly Instagram Reel about free AI tools.\nLink it to a client: /task for C-0005 Make three Reels this week.' });
   }
-  const result = await createTasks(clean, actor);
+  const result = await createTasks(clean, actor, clientIds[0] || '');
   const lines = [
     '✅ Task received. Creating structured tasks.',
     '',
     ...result.tasks.map(
       (task) =>
-        `${task.id} · ${task.priority} · ${task.owner}${task.deadline ? ` · due ${task.deadline}` : ''}\n   ${task.task}${task.notes ? `\n   ↳ ${task.notes}` : ''}`,
+        `${task.id} · ${task.priority} · ${task.owner}${task.client ? ` · ${task.client}` : ''}${task.deadline ? ` · due ${task.deadline}` : ''}\n   ${task.task}${task.notes ? `\n   ↳ ${task.notes}` : ''}`,
     ),
     '',
     result.validationIssues.length ? `⚠️ Validation: ${result.validationIssues.join('; ')}` : '',
@@ -1617,8 +1789,34 @@ async function commandAuditAll(rest, actor) {
 }
 
 async function commandSent(rest, actor) {
+  /*
+   * One verb for both halves of the deal: /sent L-0007 is the first message,
+   * /sent C-0005 is the proposal. They used to be two different ideas with the
+   * client half missing entirely, which is why proposalSentAt was never written.
+   */
+  const clientIds = extractIds(rest, 'client');
+  if (clientIds.length) {
+    try {
+      const channel = rest.replace(/C-\d{4}/i, '').trim() || 'Email';
+      const { client } = markProposalSent({ id: clientIds[0], channel }, actor);
+      return reply({
+        text: [
+          `📨 Proposal for ${client.id} ${client.company} marked sent by you.`,
+          '',
+          `Pipeline: ${client.stage}.`,
+          `Day ${config.followUp.first} follow-up falls on ${addDays(client.proposalSentAt, config.followUp.first)}.`,
+          `Day ${config.followUp.second} falls on ${addDays(client.proposalSentAt, config.followUp.second)}.`,
+          '',
+          'If they go quiet, /followups hands you the exact next message.',
+        ].join('\n'),
+      });
+    } catch (error) {
+      return reply({ text: error.message });
+    }
+  }
+
   const ids = extractIds(rest, 'lead');
-  if (!ids.length) return reply({ text: 'Usage: /sent L-0007 — call this AFTER you have actually pasted and sent the message yourself.' });
+  if (!ids.length) return reply({ text: 'Usage: /sent L-0007 (first message) or /sent C-0005 (proposal) — call this AFTER you have actually pasted and sent it yourself.' });
   try {
     const channel = rest.replace(/L-\d{4}/i, '').trim();
     const { lead } = markLeadSent({ id: ids[0], channel }, actor);
@@ -1763,6 +1961,109 @@ function commandClient(rest) {
       '',
       'Proposal: /proposal ' + client.id,
     ].filter(Boolean).join('\n'),
+  });
+}
+
+async function commandRetainer(rest, actor) {
+  const ids = extractIds(rest, 'client');
+  if (!ids.length) {
+    return reply({
+      text: [
+        'Usage: /retainer C-0002 15000 monthly',
+        '',
+        'Cycle: monthly · quarterly · yearly.',
+        'This marks the deal Won and sets the next invoice date.',
+      ].join('\n'),
+    });
+  }
+  const amountRaw = String(rest).replace(/C-\d{4}/gi, '').match(/\d[\d,.]*/)?.[0] || '';
+  const amount = Number(amountRaw.replace(/[,]/g, ''));
+  const cycle = /quarterly/i.test(rest) ? 'quarterly' : /yearly|annual/i.test(rest) ? 'yearly' : 'monthly';
+  try {
+    const { client } = setRetainer(ids[0], { amount, cycle }, actor);
+    return reply({
+      text: [
+        `💸 ${client.id} · ${client.company} is on a retainer.`,
+        '',
+        `${money(client.recurringAmount)} ${client.recurring} · next invoice ${client.nextInvoiceAt}`,
+        'Deal stage: Won.',
+        '',
+        'When you actually raise and send the invoice, /invoice ' + client.id + ' logs it and moves the date.',
+      ].join('\n'),
+      ref: client.id,
+    });
+  } catch (error) {
+    return reply({ text: error.message });
+  }
+}
+
+async function commandInvoice(rest, actor) {
+  const ids = extractIds(rest, 'client');
+  if (!ids.length) return reply({ text: 'Usage: /invoice C-0002 — call this AFTER you have actually sent the invoice.' });
+  try {
+    const { client, invoiced } = markInvoiceSent(ids[0], actor);
+    return reply({
+      text: [
+        `🧾 ${invoiced} invoice logged for ${client.id} ${client.company}.`,
+        '',
+        `${money(client.recurringAmount)} ${client.recurring} · next invoice ${client.nextInvoiceAt}`,
+        `Invoices logged so far: ${(client.invoices || []).length}`,
+        '',
+        'Payment itself is tracked outside the app — nothing here claims money has arrived.',
+      ].join('\n'),
+      ref: client.id,
+    });
+  } catch (error) {
+    return reply({ text: error.message });
+  }
+}
+
+/**
+ * The one number a one-person office actually needs: what is expected this
+ * month, what has been invoiced, and what is still just a hope in the pipeline.
+ */
+function commandMoney(actor) {
+  const today = todayKey();
+  const month = today.slice(0, 7);
+  const clients = store.db.clients || [];
+  const retainerClients = clients.filter((client) => client.recurring && client.recurringAmount);
+
+  const monthlyValue = (client) =>
+    ({ monthly: 1, quarterly: 1 / 3, yearly: 1 / 12 }[client.recurring] || 1) * Number(client.recurringAmount || 0);
+
+  const expected = retainerClients.reduce((sum, client) => sum + monthlyValue(client), 0);
+  const invoicedThisMonth = retainerClients
+    .flatMap((client) => (client.invoices || []).filter((row) => String(row.at).startsWith(month)).map((row) => ({ client, row })))
+    .reduce((sum, item) => sum + Number(item.row.amount || 0), 0);
+  const dueNow = retainerClients.filter((client) => client.nextInvoiceAt && client.nextInvoiceAt <= today);
+  const openDeals = clients.filter((client) => !['Won', 'Lost'].includes(client.stage));
+  const openValue = openDeals.reduce((sum, client) => sum + Number(client.value || 0), 0);
+
+  if (!retainerClients.length) {
+    return reply({
+      text: [
+        'No retainers yet — so there is no recurring money to report.',
+        '',
+        `Open deals: ${openDeals.length} · worth ${money(openValue)}`,
+        '',
+        'When someone says yes: /retainer C-0002 15000 monthly',
+      ].join('\n'),
+    });
+  }
+
+  return reply({
+    text: [
+      `💰 ${new Date(today).toLocaleDateString('en-GB', { month: 'long', year: 'numeric', timeZone: 'UTC' })} · money view`,
+      '',
+      `On retainer: ${retainerClients.length} client(s) · ${money(expected)}/month`,
+      `Invoiced this month: ${money(invoicedThisMonth)}`,
+      `Due to invoice now: ${dueNow.length ? dueNow.map((client) => `${client.id} ${client.nextInvoiceAt}`).join(', ') : 'nothing'}`,
+      '',
+      `Open pipeline: ${openDeals.length} deal(s) · ${money(openValue)} (not money yet)`,
+      '',
+      'This counts invoices you logged. It does not know whether they paid.',
+    ].join('\n'),
+    buttons: dueNow.length ? [{ label: 'Clients', command: '/clients', tone: 'neutral' }] : [],
   });
 }
 

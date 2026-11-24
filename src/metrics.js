@@ -111,7 +111,7 @@ export function overview(db) {
       verified: leads.length - needsVerification.length,
       needsVerification: needsVerification.length,
       won: leads.filter((lead) => lead.stage === 'Won').length,
-      byStage: ['New', 'Verified', 'Contacted', 'Replied', 'Won', 'Lost'].map((stage) => ({
+      byStage: ['New', 'Verified', 'Contacted', 'Replied', 'Won', 'Lost', 'Client'].map((stage) => ({
         stage,
         count: leads.filter((lead) => lead.stage === stage).length,
       })),
