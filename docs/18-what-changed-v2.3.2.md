@@ -78,3 +78,52 @@ restart      data survives (9 leads, 5 clients, 10 tasks after a kill -9 and res
 | SQLite | still `data/db.json`, single-writer. Fine for one person, wrong for two. |
 | Real logins | one shared access code; `actor` is a label. |
 | Auto-send | never. The approval gate is the product. |
+
+
+---
+
+## Follow-up: the HTML was broken too
+
+After restoring the render functions, a UI smoke test that actually executed the
+render path still mattered — so the markup was parsed the way a browser does it:
+
+```
+BEFORE
+  div balance       -1     one stray </div>
+  details balance    0     but the Setup fold closed too early
+```
+
+That single extra `</div>` put the palette, modal, drawer and lock screen **inside**
+the `.app` layout grid (a two-column grid, so they became stray grid items), and it
+closed the Setup fold before the exports and data panels — which is why Setup still
+showed three panels after the "declutter" pass.
+
+```
+AFTER
+  div 0 · details 0 · section 0 · aside 0 · main 0
+  duplicate ids: none
+```
+
+Panels on first paint now:
+
+| Page | Panels | Folded |
+|---|---|---|
+| Dashboard | 1 | 2 |
+| Setup | 1 | 5 |
+| Calendar | 1 | 2 |
+| My Team | 1 | – |
+| Client Finder | 2 per step | – |
+| Audit | 1 | – |
+| Everything else | single list | – |
+
+Guard added, and proven to catch it:
+
+```
+❌ HTML nesting is unbalanced    div -1      (one extra </div> inserted on purpose)
+✅ HTML nesting is balanced      div · details · section · aside · main
+```
+
+```
+npm test      31/31
+npm run check 39/39
+```
