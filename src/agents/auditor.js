@@ -412,3 +412,96 @@ export function auditSummary(audit) {
   const top = [...audit.findings].sort((a, b) => SEVERITY_ORDER[b.severity] - SEVERITY_ORDER[a.severity])[0];
   return `${audit.severity} · ${top.title}`;
 }
+
+/* ═══════════════════════════════════════════════════════════════
+   EVIDENCE HARVESTER — proof a client can see without a screenshot.
+
+   A picture is the ideal proof, but a headless browser is a heavy
+   dependency (and impossible in some sandboxes). This produces the
+   next best thing: the exact strings from their own page, with the
+   surrounding context, so the message can quote them back.
+
+   It never paraphrases and never invents. If the page did not load,
+   it returns nothing and says why.
+   ═══════════════════════════════════════════════════════════════ */
+
+/** Grab a short window of visible text around a match. */
+function around(text, needle, radius = 60) {
+  const index = text.toLowerCase().indexOf(String(needle).toLowerCase());
+  if (index === -1) return '';
+  const start = Math.max(0, index - radius);
+  const end = Math.min(text.length, index + String(needle).length + radius);
+  return `${start > 0 ? '…' : ''}${text.slice(start, end).replace(/\s+/g, ' ').trim()}${end < text.length ? '…' : ''}`;
+}
+
+/**
+ * Fetch a page and pull quotable evidence for the highest-value findings.
+ * Returns { ok, url, quotes: [...] } where every quote is verbatim from the page.
+ */
+export async function harvestEvidence(rawUrl) {
+  const url = normaliseUrl(rawUrl);
+  if (!url) return { ok: false, url: '', reason: 'No website URL to check.', quotes: [] };
+
+  const page = await fetchPage(url);
+  if (!page.ok || page.status >= 400) {
+    return {
+      ok: false,
+      url,
+      reason: page.ok ? `Page returned HTTP ${page.status}.` : page.error || 'Page did not open.',
+      quotes: [],
+    };
+  }
+
+  const html = page.body || '';
+  const text = strip(html);
+  const quotes = [];
+
+  const push = (label, quote) => {
+    if (quote) quotes.push({ label, quote });
+  };
+
+  // 1. Unfinished template copy — the most embarrassing one to show them.
+  for (const rx of PLACEHOLDERS) {
+    const match = text.match(rx);
+    if (match) {
+      push('unfinished template text', around(text, match[0]));
+      break;
+    }
+  }
+
+  // 2. Dollar prices on an Indian business page.
+  const dollars = [...new Set(text.match(/\$\s?\d{1,4}(?:\.\d{2})?/g) || [])].slice(0, 3);
+  if (dollars.length) push('prices in dollars', around(text, dollars[0]));
+
+  // 3. What a customer sees if the booking step is missing.
+  if (!BOOKING_WORDS.test(text) && !ORDER_WORDS.test(text)) {
+    push('no booking or order wording anywhere', `Page text never contains: book, appointment, order, cart, menu, price`);
+  }
+
+  // 4. The page title, i.e. what Google and WhatsApp show.
+  const title = (html.match(/<title[^>]*>([\s\S]{0,180}?)<\/title>/i) || [, ''])[1].trim();
+  push('page title (shown in search results)', title || '(no <title> element at all)');
+
+  // 5. A broken or foreign contact path.
+  const tel = (html.match(/href=["']tel:([^"']+)["']/i) || [])[1] || '';
+  if (tel) push('the number behind the Call button', `tel:${tel}`);
+  const wa = (html.match(/(?:wa\.me|api\.whatsapp\.com\/send\?phone=)\/?(\d{6,15})/i) || [])[1] || '';
+  if (wa) push('the number behind the WhatsApp button', `+${wa}`);
+
+  return {
+    ok: true,
+    url: page.finalUrl || url,
+    status: page.status,
+    title,
+    quotes,
+    checkedAt: new Date().toISOString(),
+    note: 'Verbatim strings from the live page. A screenshot can be added later with a headless browser.',
+  };
+}
+
+/** Client-facing one-liner built only from harvested quotes. */
+export function evidenceLine(evidence) {
+  if (!evidence?.ok || !evidence.quotes?.length) return '';
+  const first = evidence.quotes[0];
+  return `${first.label}: "${first.quote.slice(0, 140)}"`;
+}

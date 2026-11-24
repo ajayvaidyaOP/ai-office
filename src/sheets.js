@@ -10,7 +10,9 @@ import { store } from './store.js';
  * import them into a sheet named "AI Invincible Office" with tabs
  * Tasks / Drafts / Leads / Daily Log — or paste a single row straight in.
  *
- * No OAuth is required for export. Direct write-back is opt-in and documented
+ * No OAuth and no service account are needed: this is a one-way CSV export.
+ * (Direct Sheets write-back was removed in v2.2 — it was never called and
+ *  always failed without a Google service account.)
  * in docs/03-google-sheets.md.
  */
 
@@ -122,22 +124,3 @@ export function exportAllCsv(targetDir) {
   return written;
 }
 
-/**
- * Optional direct sync. Requires a service account JSON and GOOGLE_SHEETS_ID.
- * Disabled by default; returns a clear reason instead of failing silently.
- */
-export async function syncToSheets() {
-  const id = process.env.GOOGLE_SHEETS_ID;
-  const keyFile = process.env.GOOGLE_SERVICE_ACCOUNT_FILE;
-  if (!id || !keyFile || !fs.existsSync(keyFile)) {
-    return {
-      ok: false,
-      reason: 'Direct Sheets sync is not configured. Use the CSV export or n8n Google Sheets node (docs/03-google-sheets.md).',
-    };
-  }
-  return {
-    ok: false,
-    reason: 'Direct sync is intentionally manual in this build: verify OAuth scopes (Chapter 9 least privilege) before enabling write-back.',
-    spreadsheetId: id,
-  };
-}

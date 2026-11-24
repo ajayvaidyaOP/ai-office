@@ -19,6 +19,7 @@ const ui = {
   paletteIndex: 0,
   paletteItems: [],
   drawerClientId: null,
+  live: false, // true only while /api/stream is actually open
 };
 
 const esc = (value = '') =>
@@ -137,6 +138,8 @@ async function unlockWith(value) {
   setCode(value);
   hideLock();
   await refresh();
+  // The stream may have failed while we were locked — open it again with the code.
+  if (!ui.live) startLiveStream();
   return true;
 }
 
@@ -392,7 +395,7 @@ function renderDashboard() {
   renderActivityChart();
 
   const followUps = [...(data.overview.followUps.list || [])];
-  $('#followup-list').innerHTML = followUps.length
+  $('#dash-followup-list').innerHTML = followUps.length
     ? followUps
         .slice(0, 5)
         .map(
@@ -697,6 +700,128 @@ function renderTasks() {
 
 /* ── clients ───────────────────────────────────────────────── */
 
+/* ── My Team ────────────────────────────────────────────────── */
+
+const TEAM_ACCENT = {
+  manager: '#a78bfa',
+  content: '#38bdf8',
+  research: '#a3e635',
+  finder: '#34d399',
+  followup: '#fbbf24',
+  quality: '#fb7185',
+  report: '#c4b5fd',
+  proposal: '#f472b6',
+};
+
+const RESULT_TONE = {
+  ok: { label: 'worked', color: '#a3e635' },
+  fallback: { label: 'worked offline', color: '#fbbf24' },
+  failed: { label: 'failed', color: '#fb7185' },
+  never: { label: 'not started', color: '#64748b' },
+};
+
+/** Switch between the four Client Finder steps and keep the counters honest. */
+function showFinderPane(pane) {
+  if (!pane) return;
+  $$('#finder-tabs button').forEach((item) => item.classList.toggle('is-active', item.dataset.pane === pane));
+  $$('.finder-pane').forEach((section) => section.classList.toggle('is-active', section.dataset.pane === pane));
+  const leads = (ui.state?.leads || []);
+  const audited = leads.filter((lead) => lead.audit?.reachable).length;
+  $('#seg-leads').textContent = leads.length;
+  $('#seg-audited').textContent = audited;
+  const hints = {
+    search: 'Step 1 — describe the niche. You get a research plan, not a contact list.',
+    leads: 'Step 2 — every lead needs a public source and your check before outreach.',
+    audit: 'Step 3 — audit opens the real page. Evidence, never guesses.',
+    manual: 'Step 4 — already know the business? Paste it with the source link.',
+  };
+  $('#finder-hint').textContent = hints[pane] || '';
+  $('#content').scrollTop = 0;
+}
+
+function renderTeam() {
+  const state = ui.state;
+  if (!state) return;
+  const rows = state.team?.rows || [];
+  const summary = state.team?.summary || { total: 0, activeToday: 0, failing: [], neverRun: [], waitingItems: 0 };
+
+  const working = rows.filter((row) => row.runsToday > 0).length;
+  const needs = rows.filter((row) => row.waiting.length > 0).length;
+
+  $('#team-head').innerHTML = `
+    <div class="team-banner">
+      <div>
+        <b>${working} of ${summary.total} agents worked today.</b>
+        <span>${needs} agent${needs === 1 ? '' : 's'} holding work for you · ${summary.waitingItems} item${summary.waitingItems === 1 ? '' : 's'} blocked on a human decision</span>
+      </div>
+      <button class="btn btn-ghost btn-sm" data-command="/brief"><svg class="ic"><use href="#i-moon" /></svg>Ask for a brief</button>
+    </div>
+    ${summary.neverRun.length ? `<p class="team-note">Never used yet: ${esc(summary.neverRun.join(', '))}. They are built and waiting — nothing is hidden.</p>` : ''}`;
+
+  if (!rows.length) {
+    $('#team-grid').innerHTML = emptyState('No agents loaded', 'Restart the office once.');
+    return;
+  }
+
+  $('#team-grid').innerHTML = rows
+    .map((row) => {
+      const tone = RESULT_TONE[row.lastResult] || RESULT_TONE.never;
+      const accent = TEAM_ACCENT[row.id] || '#8b5cf6';
+      const doing = row.doing.length
+        ? row.doing.map((line) => `<li>${esc(line)}</li>`).join('')
+        : `<li class="muted">Nothing in hand right now.</li>`;
+      const waiting = row.waiting.length
+        ? row.waiting.map((line) => `<li><svg class="ic" style="color:#fbbf24"><use href="#i-alert" /></svg>${esc(line)}</li>`).join('')
+        : '';
+      return `<article class="team-card" style="--accent:${accent}">
+        <header>
+          <span class="agent-dot" style="background:${accent}22;color:${accent}">${esc(initials(row.name))}</span>
+          <div class="tm-title"><b>${esc(row.name)}</b><small>${esc(row.humanControl)}</small></div>
+          <span class="tm-state" style="color:${tone.color}"><span class="dot" style="background:${tone.color}"></span>${esc(tone.label)}</span>
+        </header>
+        <p class="tm-job">${esc(row.responsibility)}</p>
+        <div class="tm-stats">
+          <span><b>${row.runs}</b> run${row.runs === 1 ? '' : 's'}</span>
+          <span><b>${row.okRate === null ? '—' : `${row.okRate}%`}</b> ok</span>
+          <span><b>${row.finished}</b> finished</span>
+          <span>${esc(row.idle)}</span>
+        </div>
+        <div class="tm-block"><span class="tm-label">Doing now</span><ul>${doing}</ul></div>
+        ${waiting ? `<div class="tm-block tm-wait"><span class="tm-label">Waiting on you</span><ul>${waiting}</ul></div>` : ''}
+        <footer>
+          <span class="mono xs">${esc(row.provider)}</span>
+          <button class="link-btn" data-command="/brief">brief<svg class="ic"><use href="#i-chevron" /></svg></button>
+        </footer>
+      </article>`;
+    })
+    .join('');
+
+  const held = [];
+  for (const draft of (state.drafts || []).filter((d) => d.status === 'Awaiting approval')) {
+    held.push({ id: draft.id, what: `${draft.platform} draft: ${draft.title || draft.request}`, who: 'Content agent', view: 'approvals' });
+  }
+  for (const lead of (state.leads || []).filter((l) => l.reviewStatus !== 'Verified by human').slice(0, 6)) {
+    held.push({ id: lead.id, what: `${lead.businessName} — needs a human check`, who: 'Research agent', view: 'finder' });
+  }
+  for (const lead of (state.leads || []).filter((l) => l.audit?.findings?.length && l.stage === 'Verified').slice(0, 4)) {
+    held.push({ id: lead.id, what: `${lead.businessName} — audit ready, no outreach yet`, who: 'Finder', view: 'finder' });
+  }
+
+  $('#team-held-count').textContent = `${held.length} held`;
+  $('#team-held').innerHTML = held.length
+    ? held
+        .slice(0, 10)
+        .map(
+          (row) => `<div class="list-row">
+            <span class="agent-dot">${esc(initials(row.who))}</span>
+            <span class="l-main"><b>${esc(row.what)}</b><small>${esc(row.who)} · ${esc(row.id)}</small></span>
+            <button class="link-btn" data-view="${row.view}">open<svg class="ic"><use href="#i-chevron" /></svg></button>
+          </div>`,
+        )
+        .join('')
+    : emptyState('Nothing is stuck on you', 'Every agent is clear to continue.');
+}
+
 function renderClients() {
   const state = ui.state;
   if (!state) return;
@@ -893,7 +1018,7 @@ function renderAuditPanel() {
   const host = $('#audit-results');
   if (!host) return;
   const leads = (ui.state?.leads || []).filter((lead) => lead.audit);
-  $('#audit-count').textContent = `${leads.length} audited`;
+  $('#finder-audit-count').textContent = `${leads.length} audited`;
 
   if (!leads.length) {
     host.innerHTML = `<div class="empty-state" style="padding:14px 4px"><span>No audits yet. Pick a lead below and press audit, or audit the next five in one go.</span></div>`;
@@ -1225,7 +1350,6 @@ function renderSetup() {
     ['Gemini API key', secrets.geminiKey ? 'set' : 'optional', secrets.geminiKey],
     ['Google Places key', secrets.placesApiKey ? 'set — live lead search' : 'optional — OSM is free', secrets.placesApiKey],
     ['Webhook secret', secrets.webhookSecret ? 'set' : 'optional', secrets.webhookSecret],
-    ['Google Sheet ID', secrets.googleSheetId ? 'set' : 'CSV export available', secrets.googleSheetId],
   ];
   $('#secret-list').innerHTML = rows
     .map(
@@ -1245,6 +1369,89 @@ function renderSetup() {
       ([label, value, ok]) =>
         `<li><span class="mark ${ok ? 'mark-yes' : 'mark-no'}">${ok ? '✓' : '–'}</span><span><b>${esc(label)}</b><br>${esc(value)}</span></li>`,
     )
+    .join('');
+
+  renderDeployChecklist();
+}
+
+/**
+ * Deployment checklist driven by REAL state.
+ * Previously these were seven hardcoded <li> items, so the page said
+ * "Engine reachable" even when the engine was down. Each row below is
+ * computed from the state the server just returned.
+ */
+function renderDeployChecklist() {
+  const host = $('#deploy-list');
+  if (!host) return;
+  const state = ui.state || {};
+  const secrets = state.secrets || {};
+  const provider = state.provider || {};
+  const settings = state.meta?.settings || {};
+  const tg = state.telegram || {};
+  const scheduler = state.scheduler || {};
+  const lastBackup = state.meta?.lastBackupAt || null;
+  const leadCount = (state.leads || []).length;
+  const audited = (state.leads || []).filter((lead) => lead.audit).length;
+
+  const engineUp = Boolean(provider.ollama?.reachable || provider.gemini?.configured);
+  const backupAgeDays = lastBackup
+    ? Math.floor((Date.now() - new Date(lastBackup).getTime()) / 86_400_000)
+    : null;
+  const backupFresh = backupAgeDays !== null && backupAgeDays <= 14;
+
+  const rows = [
+    [
+      engineUp ? 'AI engine reachable' : 'AI engine: offline rules only',
+      engineUp ? 'Ollama or Gemini is answering.' : 'No model configured — drafts use the built-in rules engine. Fine, but blunter.',
+      engineUp,
+      false,
+    ],
+    [
+      secrets.accessCode ? 'Console is locked' : 'Console is NOT locked',
+      secrets.accessCode
+        ? 'OFFICE_ACCESS_CODE is set; the dashboard asks for it.'
+        : 'Anyone who can reach this port can read and change your office.',
+      Boolean(secrets.accessCode),
+      true,
+    ],
+    [
+      tg.configured ? 'Telegram connected' : 'Telegram not connected',
+      tg.configured ? `mode: ${tg.mode || 'off'}` : 'Optional. The daily brief can post to your own chat only.',
+      Boolean(tg.configured),
+      false,
+    ],
+    [
+      scheduler.enabled ? `Daily brief at ${String(scheduler.hour ?? 9).padStart(2, '0')}:${String(scheduler.minute ?? 0).padStart(2, '0')}` : 'Scheduler is off',
+      scheduler.enabled ? 'Brief + follow-up queue are built in — no n8n needed.' : 'Set SCHEDULER=on to get a morning brief.',
+      Boolean(scheduler.enabled),
+      false,
+    ],
+    [
+      backupFresh ? `Backup ${backupAgeDays}d old` : lastBackup ? `Backup is ${backupAgeDays}d old` : 'No backup yet',
+      backupFresh ? 'Recent enough. Copy it off this machine.' : 'Run npm run backup — the database lives in one file.',
+      backupFresh,
+      true,
+    ],
+    [
+      leadCount ? `${audited}/${leadCount} leads audited` : 'No leads yet',
+      leadCount ? 'Audit before outreach: /audit-all' : 'Import real businesses from the Client Finder.',
+      leadCount > 0 && audited > 0,
+      true,
+    ],
+    [
+      'Approval gate active',
+      'Every draft waits for Approve / Revise / Reject. Nothing sends itself.',
+      true,
+      false,
+    ],
+  ];
+
+  host.innerHTML = rows
+    .map(([label, detail, ok, important]) => {
+      const tone = ok ? 'mark-yes' : important ? 'mark-no' : 'mark-no';
+      const suffix = !ok && important ? ' <b class="xs">(fix this)</b>' : '';
+      return `<li><span class="mark ${tone}">${ok ? '✓' : '–'}</span><span><b>${esc(label)}</b>${suffix}<br><span class="muted xs">${esc(detail)}</span></span></li>`;
+    })
     .join('');
 }
 
@@ -1780,6 +1987,7 @@ const PAGES = {
   console: ['AI Console', 'Ask your manager. Every draft waits for your approval.'],
   approvals: ['Approvals', 'Read, revise, approve. Nothing leaves this office without you.'],
   work: ['Work', 'Tasks with owners, priorities and deadlines.'],
+  team: ['My Team', 'Eight agents. What each one is doing, holding, and waiting on you for.'],
   clients: ['Clients', 'Your pipeline and client records.'],
   finder: ['Client Finder', 'Public-source research with human verification.'],
   calendar: ['Calendar', 'Deadlines, follow-ups and approvals in one timeline.'],
@@ -1798,11 +2006,158 @@ function setView(view) {
   $('#page-title').textContent = title;
   $('#page-sub').textContent = sub;
   $('#content').scrollTop = 0;
+  if (!$('#page-help')?.hidden) renderPageHelp();
   if (view === 'guide' && !ui.docs.length) loadDocs();
+  if (view === 'team') renderTeam();
   if (view === 'clients') renderClients();
-  if (view === 'finder') renderFinder();
+  if (view === 'finder') {
+    renderFinder();
+    const active = $('.finder-pane.is-active')?.dataset.pane || 'search';
+    showFinderPane(active);
+  }
   if (view === 'reports') renderReports();
   if (view === 'setup') renderSetup();
+}
+
+/* ── page help: what every button is for ───────────────────── */
+
+/**
+ * Plain answers to "what does this screen do and which button should I press".
+ * Written for someone opening the console for the first time, not for docs.
+ */
+const PAGE_HELP = {
+  dashboard: {
+    what: 'One screen answer to: what needs me right now?',
+    steps: [
+      ['Morning brief', 'Asks the office to summarise today. Read it, then clear the queue.'],
+      ['Ring on the left', 'Your office score: approvals waiting, overdue work, blocked items.'],
+      ['Cards below', 'Click any number to jump to the full list behind it.'],
+    ],
+    avoid: 'Do not start new work while the Approvals badge is above zero.',
+  },
+  console: {
+    what: 'Where you type commands in plain English. Nothing here sends anything to a client.',
+    steps: [
+      ['Type or pick a chip', 'e.g. /task plan the week, /find cafés in Pune, /draft an Instagram post.'],
+      ['Enter', 'The office answers with drafts, plans or lists — all gated behind your approval.'],
+      ['/help', 'Lists every command with one line each.'],
+    ],
+    avoid: 'Slash commands are exact. /draft works; "write me a post" is a guess.',
+  },
+  approvals: {
+    what: 'The gate. Every draft — content, outreach, proposal — stops here until you decide.',
+    steps: [
+      ['Approve', 'Marks it ready. You still post or send it yourself; the app never does.'],
+      ['Revise', 'Creates a new version and keeps the old one in history.'],
+      ['Reject', 'Closes it with your reason so the same mistake is not repeated.'],
+    ],
+    avoid: 'Approve means "I checked this", not "publish this".',
+  },
+  team: {
+    what: 'Eight agents. What each one is doing, what it finished, and what it is holding for you.',
+    steps: [
+      ['Status dot', 'Green worked, amber worked offline, red failed, grey never used.'],
+      ['Doing now', 'The actual items in its hands — not a health score.'],
+      ['Waiting on you', 'Work that cannot move until you approve or verify.'],
+    ],
+    avoid: 'If an agent says "never run", that feature exists but you have not used it yet.',
+  },
+  work: {
+    what: 'Tasks with an owner, a priority and a deadline. Owners are you or an agent.',
+    steps: [
+      ['New task', 'Describe the work; the manager splits it into owned tasks.'],
+      ['Filters', 'Open / Pending / Blocked / Done — use them instead of scrolling.'],
+      ['CSV', 'Downloads the current table for a spreadsheet.'],
+    ],
+    avoid: 'A task owned by "You" is the only kind that moves on its own. Others need you to act.',
+  },
+  clients: {
+    what: 'Your small CRM: one card per client, moving through the pipeline.',
+    steps: [
+      ['Add client', 'Only for businesses you already talked to. Leads live in Client Finder.'],
+      ['Stage', 'Lead → Proposal sent → Negotiation → Won / Lost.'],
+      ['Drawer', 'Click a card for notes, follow-up date and proposal draft.'],
+    ],
+    avoid: 'Do not put a cold lead here; verify it first in Client Finder.',
+  },
+  finder: {
+    what: 'Four steps: find real businesses, check them, audit their site, or add one you already know.',
+    steps: [
+      ['1 · Find', 'Niche + city. You get a research plan you can actually execute.'],
+      ['2 · Leads', 'Live search pulls real businesses from OpenStreetMap with source links.'],
+      ['3 · Audit', 'Opens the page and reports only what is there. Failed fetch is not a finding.'],
+      ['4 · Add manually', 'Paste a business you saw. It still needs a public source URL.'],
+    ],
+    avoid: 'Nothing here guesses a phone number or a name. If it was not found, it stays empty.',
+  },
+  calendar: {
+    what: 'Next 21 days of deadlines and follow-ups.',
+    steps: [
+      ['Agenda', 'Everything due, oldest first.'],
+      ['Overdue', 'Past its date and still open — fix these first.'],
+      ['Waiting on you', 'Approvals that block other people.'],
+    ],
+    avoid: 'Nothing is auto-rescheduled. Overdue work stays overdue until you change it.',
+  },
+  reports: {
+    what: 'Daily log, agent health, model usage.',
+    steps: [
+      ['Daily log', 'One row per day you generated a report.'],
+      ['Agent health', 'Runs, success rate, average time, engine used.'],
+      ['Model usage', 'Calls today against your daily cap.'],
+    ],
+    avoid: 'An agent with 0 runs is not broken; it simply has not been used.',
+  },
+  audit: {
+    what: 'Every command, decision and blocked action, newest first.',
+    steps: [
+      ['Timeline', 'Who did what, on which record, at what time.'],
+      ['Levels', 'info, warn, and blocked events tell you what the system refused.'],
+    ],
+    avoid: 'This list is append-only by design. It is your audit trail, not a debug log.',
+  },
+  setup: {
+    what: 'Your profile, the AI engine, exports and a real deployment checklist.',
+    steps: [
+      ['Profile', 'Name, company, currency, monthly target.'],
+      ['Engine', 'Ollama or Gemini. Offline rules always work without either.'],
+      ['Checklist', 'Green means actually verified, not "probably fine".'],
+      ['Backup', 'Downloads a snapshot. Copy it off this machine.'],
+    ],
+    avoid: 'Do not leave the console unlocked if this port is reachable from outside.',
+  },
+  guide: {
+    what: 'The written guide, chapter by chapter, plus what changed in v2.1 and v2.2.',
+    steps: [['Pick a chapter', 'Reads the markdown straight from docs/.']],
+    avoid: 'Anything marked legacy in the setup chapters describes the old n8n path, which is gone.',
+  },
+};
+
+function renderPageHelp() {
+  const panel = $('#page-help');
+  if (!panel || panel.hidden) return;
+  const help = PAGE_HELP[ui.view];
+  if (!help) {
+    panel.innerHTML = '';
+    return;
+  }
+  panel.innerHTML = `<div class="help-card">
+    <header>
+      <b>${esc(PAGES[ui.view]?.[0] || '')} — what this page does</b>
+      <button class="icon-btn" data-help-close type="button" aria-label="Close help"><svg class="ic"><use href="#i-close" /></svg></button>
+    </header>
+    <p class="help-what">${esc(help.what)}</p>
+    <ol class="help-steps">${help.steps.map(([label, text]) => `<li><b>${esc(label)}</b><span>${esc(text)}</span></li>`).join('')}</ol>
+    <p class="help-avoid"><b>Watch out:</b> ${esc(help.avoid)}</p>
+  </div>`;
+}
+
+function togglePageHelp(force) {
+  const panel = $('#page-help');
+  if (!panel) return;
+  const next = force === undefined ? panel.hidden : force;
+  panel.hidden = !next;
+  if (next) renderPageHelp();
 }
 
 function renderChrome() {
@@ -1818,6 +2173,8 @@ function renderChrome() {
   $('#badge-approvals').hidden = o.drafts.awaiting === 0;
   $('#badge-approvals').textContent = o.drafts.awaiting;
   $('#count-work').textContent = o.tasks.open;
+  const team = state.team?.summary;
+  $('#count-team').textContent = team ? `${team.activeToday}/${team.total}` : '0';
   $('#count-clients').textContent = o.clients.total;
   $('#count-leads').textContent = o.leads.total;
 
@@ -1834,6 +2191,7 @@ function renderAll() {
   renderConsole();
   renderApprovals();
   renderTasks();
+  renderTeam();
   renderClients();
   renderFinder();
   renderCalendar();
@@ -1935,6 +2293,20 @@ function bindGlobal() {
     if (view) setView(view.dataset.goto);
   });
 
+  $('#btn-help').addEventListener('click', () => togglePageHelp());
+  document.addEventListener('click', (event) => {
+    if (event.target.closest('[data-help-close]')) togglePageHelp(false);
+  });
+  document.addEventListener('keydown', (event) => {
+    // "?" opens the page help, Escape closes it. Ignore while typing.
+    const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement?.tagName || '');
+    if (event.key === '?' && !typing) {
+      event.preventDefault();
+      togglePageHelp();
+    }
+    if (event.key === 'Escape' && !$('#page-help')?.hidden) togglePageHelp(false);
+  });
+
   $('#search-trigger').addEventListener('click', openPalette);
 
   $('#btn-new').addEventListener('click', () => {
@@ -2028,6 +2400,12 @@ function bindGlobal() {
     ui.reportTab = button.dataset.tab;
     $$('#report-tabs button').forEach((item) => item.classList.toggle('is-active', item === button));
     $$('.report-pane').forEach((pane) => pane.classList.toggle('is-active', pane.id === `report-${button.dataset.tab}`));
+  });
+
+  $('#finder-tabs')?.addEventListener('click', (event) => {
+    const button = event.target.closest('button');
+    if (!button) return;
+    showFinderPane(button.dataset.pane);
   });
 
   $('#btn-report').addEventListener('click', async () => {
@@ -2416,6 +2794,103 @@ function bindLock() {
   });
 }
 
+/* ── live state (v2.3) ─────────────────────────────────────── */
+
+/** The honest light: green only while the stream is actually open. */
+function updateLivePill(status) {
+  const pill = $('#live-pill');
+  if (!pill) return;
+  const map = {
+    live: { label: 'live', color: '#a3e635', title: 'Connected — updates arrive instantly' },
+    connecting: { label: 'connecting', color: '#fbbf24', title: 'Opening the live connection' },
+    offline: { label: 'polling', color: '#fb7185', title: 'Live stream unavailable — refreshing every 30s instead' },
+  };
+  const tone = map[status] || map.connecting;
+  pill.dataset.status = status;
+  pill.querySelector('b').textContent = tone.label;
+  pill.querySelector('.dot').style.background = tone.color;
+  pill.title = tone.title;
+}
+
+/**
+ * Subscribe to /api/stream. The browser reconnects by itself on failure; we only
+ * need to reflect the state honestly and fall back to polling if it never opens.
+ */
+function startLiveStream() {
+  if (!('EventSource' in window)) {
+    ui.live = false;
+    updateLivePill('offline');
+    return;
+  }
+  let stream;
+  try {
+    // If the console is locked the code is in memory only; pass it through the
+    // query string because EventSource cannot set headers.
+    const saved = getCode();
+    const code = saved ? `?code=${encodeURIComponent(saved)}` : '';
+    stream = new EventSource(`/api/stream${code}`);
+  } catch {
+    ui.live = false;
+    updateLivePill('offline');
+    return;
+  }
+
+  stream.addEventListener('hello', () => {
+    ui.live = true;
+    updateLivePill('live');
+  });
+
+  stream.addEventListener('state', (event) => {
+    let payload;
+    try {
+      payload = JSON.parse(event.data);
+    } catch {
+      return;
+    }
+    if (!payload?.state) return;
+    const previousView = ui.view;
+    const lastId = (ui.state?.messages || []).at(-1)?.id;
+    ui.state = payload.state;
+    // Only repaint what the person is looking at, so a live update never
+    // yanks them out of a form they are typing into.
+    renderChrome();
+    if (ui.busy) return;
+    if (previousView === 'dashboard') renderDashboard();
+    if (previousView === 'team') renderTeam();
+    if (previousView === 'approvals') renderApprovals();
+    if (previousView === 'work') renderTasks();
+    if (previousView === 'clients') renderClients();
+    if (previousView === 'finder') renderFinder();
+    if (previousView === 'calendar') renderCalendar();
+    if (previousView === 'reports') renderReports();
+    if (previousView === 'audit') renderAudit();
+    if (previousView === 'console') {
+      renderConsole();
+      if ((ui.state?.messages || []).at(-1)?.id !== lastId) renderChat();
+    }
+    flashLive();
+  });
+
+  stream.addEventListener('error', () => {
+    // EventSource retries on its own; only downgrade the indicator.
+    if (ui.live) {
+      ui.live = false;
+      updateLivePill('offline');
+    }
+  });
+
+  window.addEventListener('beforeunload', () => stream.close());
+}
+
+/** A short green pulse in the top bar so you can see the update land. */
+function flashLive() {
+  const pill = $('#live-pill');
+  if (!pill) return;
+  pill.classList.remove('just-updated');
+  void pill.offsetWidth;
+  pill.classList.add('just-updated');
+}
+
 async function boot() {
   bindLock();
   const fresh = await fetch('/healthz').then((r) => r.json()).catch(() => null);
@@ -2435,6 +2910,9 @@ async function boot() {
   setView('dashboard');
   loadSourcingStatus();
 
+  startLiveStream();
+  updateLivePill('connecting');
+
   let lastMessage = (ui.state?.messages || []).at(-1)?.id || '';
   setInterval(async () => {
     if (document.hidden || ui.view !== 'console' || ui.busy) return;
@@ -2453,7 +2931,7 @@ async function boot() {
   }, 12_000);
 
   setInterval(() => {
-    if (document.hidden) return;
+    if (document.hidden || ui.live) return;
     api('/api/state')
       .then((next) => {
         ui.state = next;

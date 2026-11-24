@@ -4,8 +4,9 @@
 finder builds research plans, a content studio drafts posts, proposals and outreach, and a CRM
 tracks the money — with **one rule: nothing leaves the office without your approval**.
 
-Built on the 23-page *AI Digital Office* setup guide (n8n + Ollama + Google Sheets + Telegram,
-human approval gates), extended into a full working product:
+Built on the 23-page *AI Digital Office* setup guide, extended into a full working product.
+(n8n and Google Sheets from the original guide were removed in v2.2 — the app now has its
+own scheduler and a CSV export. See `docs/15-what-changed-v2.1.md`.)
 
 - **Dashboard** — health score, focus list, pipeline, approval queue, activity chart.
 - **AI Console** — talk to your manager: `/task`, `/draft`, `/brief`, `/find`, `/clients`.
@@ -100,14 +101,15 @@ AI_PROVIDER=auto OLLAMA_MODEL=llama3.2 npm start
 
 Or copy `.env.example` → `.env`. **Setup → Test connection** shows the live engine.
 
-### 3. Full guide stack (n8n + Docker)
+### 3. Docker (this office only)
 
 ```bash
-cp .env.example .env      # set N8N_ENCRYPTION_KEY, Telegram token, timezone
-docker compose up -d      # n8n :5678, office :3000
+cp .env.example .env      # set OFFICE_ACCESS_CODE, Telegram token, timezone
+docker compose up -d      # → office on :3000
 ```
 
-Then import the starters from `n8n/workflows/` — see `docs/06-n8n-workflows.md`.
+No n8n container, no workflow imports — the daily brief and follow-up queue are built in
+(`src/scheduler.js`). Your data lives in `./data`, mounted into the container.
 
 ## How it is built
 
@@ -123,13 +125,14 @@ src/
     provider.js          Ollama / Gemini resolution, JSON extraction, daily cost cap
     offline.js           deterministic rules engine (always available)
     index.js             agent entry points with validation + fallback
+    auditor.js           website auditor + evidence harvester (read-only)
   channels/telegram.js   polling + webhook connector, allow-list
+  scheduler.js           daily brief + follow-up queue (replaces n8n)
 public/                  the console: HTML, CSS design system, ES-module app
-docs/                    15 chapters: setup, CRM, prompts, security, budget, API…
-n8n/workflows/           4 importable starter workflows
-templates/               Google Sheets CSV headers
-scripts/check.mjs        end-to-end self-check
-scripts/backup.mjs       DB + CSV backup
+docs/                    guide + v2.1/v2.2/v2.3 changelogs + your Pune pitch pack
+test/                    node --test unit tests with local fixtures
+scripts/check.mjs        end-to-end self-check (30 checks)
+scripts/backup.mjs       DB + CSV backup with sha256 + freshness report
 ```
 
 Flow: **command → action → agent (Ollama/Gemini/offline) → validate → store → gate → your decision → audit.**

@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { config, BRAND } from './config.js';
+import { repairLegacyRuns } from './team.js';
 
 const DB_FILE = path.join(config.dataDir, 'db.json');
 
@@ -51,6 +52,25 @@ class Store {
   constructor() {
     fs.mkdirSync(config.dataDir, { recursive: true });
     this.db = this.#load();
+    // Anything that wants to be told about writes (the live SSE stream) hooks here.
+    this.listeners = new Set();
+    this.pendingNotify = null;
+  }
+
+  /** Subscribe to every write. Returns an unsubscribe function. */
+  onChange(listener) {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  }
+
+  #announce(action) {
+    for (const listener of this.listeners) {
+      try {
+        listener(action);
+      } catch {
+        /* a broken listener must never break a save */
+      }
+    }
   }
 
   #load() {
@@ -58,7 +78,7 @@ class Store {
       if (!fs.existsSync(DB_FILE)) return emptyDb();
       const parsed = JSON.parse(fs.readFileSync(DB_FILE, 'utf8'));
       const base = emptyDb();
-      return {
+      const merged = {
         ...base,
         ...parsed,
         meta: {
@@ -71,6 +91,18 @@ class Store {
         clients: parsed.clients || [],
         runs: parsed.runs || [],
       };
+      // One-time history repair: rows written before v2.3 marked a successful
+      // offline fallback as a failure. Relabel in place, never delete.
+      const repaired = repairLegacyRuns(merged.runs);
+      if (repaired) {
+        try {
+          fs.writeFileSync(DB_FILE, JSON.stringify(merged, null, 2));
+          console.log(`[store] Relabelled ${repaired} run(s) that fell back to the offline engine.`);
+        } catch {
+          /* the fix will simply run again next boot */
+        }
+      }
+      return merged;
     } catch (error) {
       const backup = `${DB_FILE}.corrupt-${Date.now()}`;
       try {
@@ -84,11 +116,18 @@ class Store {
   }
 
   /** Atomic-ish save: write temp file, then rename over the database. */
-  save() {
+  save(action = 'state') {
     const tmp = `${DB_FILE}.tmp`;
     fs.mkdirSync(config.dataDir, { recursive: true });
     fs.writeFileSync(tmp, JSON.stringify(this.db, null, 2));
     fs.renameSync(tmp, DB_FILE);
+    // Coalesce bursts: a single command can write several times in a row.
+    if (this.pendingNotify) return;
+    this.pendingNotify = setTimeout(() => {
+      this.pendingNotify = null;
+      this.#announce(action);
+    }, 60);
+    if (this.pendingNotify.unref) this.pendingNotify.unref();
   }
 
   get settings() {
@@ -141,17 +180,20 @@ class Store {
     };
     this.db.audit.unshift(entry);
     this.db.audit = this.db.audit.slice(0, 800);
-    this.save();
+    this.save(action);
     return entry;
   }
 
   /** One row per agent invocation — powers the Agents and Reports pages. */
-  recordRun({ agent, ok = true, provider = 'offline', ms = 0, ref = '', detail = '' }) {
+  recordRun({ agent, ok = true, provider = 'offline', ms = 0, ref = '', detail = '', fallback = false }) {
     const entry = {
       id: `R-${crypto.randomBytes(3).toString('hex')}`,
       ts: nowIso(),
       agent,
       ok: Boolean(ok),
+      // `fallback` = the model did not answer, local rules did the work instead.
+      // The job still got done, so this is not a failure — it is a note.
+      fallback: Boolean(fallback),
       provider,
       ms: Math.round(ms),
       ref,

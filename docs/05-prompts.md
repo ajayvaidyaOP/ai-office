@@ -1,5 +1,11 @@
 # Prompts — your agents' job descriptions
 
+> **v2.2 note — n8n and Google Sheets were removed.** They were never referenced by
+> the code, and the built-in scheduler + follow-up engine now do that job. Any `n8n` or
+> Sheets instruction below is **legacy from the original guide** — you do not need it, and
+> nothing in the app depends on it. See `docs/15-what-changed-v2.1.md`.
+
+
 Copied from Chapters 4, 5, 8 and 14 of the guide. The live versions are in
 `src/agents/prompts.js`; edit there and restart to change behaviour.
 

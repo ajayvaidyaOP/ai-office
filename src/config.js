@@ -10,7 +10,7 @@ export const BRAND = {
   short: 'Invincible',
   workspace: 'Invincible HQ',
   tagline: 'Plan the week, find the clients, draft the work — you approve everything.',
-  version: '2.0.0',
+  version: '2.3.0',
 };
 
 /** Tiny .env loader — no dependencies, never overrides real environment values. */
@@ -101,10 +101,6 @@ export const config = {
     requestTimeoutMs: num(process.env.SOURCING_TIMEOUT_MS, 30_000),
   },
 
-  sheets: {
-    spreadsheetId: process.env.GOOGLE_SHEETS_ID || '',
-    serviceAccountFile: process.env.GOOGLE_SERVICE_ACCOUNT_FILE || '',
-  },
 
   telegram: {
     botToken: process.env.TELEGRAM_BOT_TOKEN || '',
@@ -126,6 +122,4 @@ export const secretStatus = () => ({
   telegramBotToken: hasSecret(config.telegram.botToken),
   geminiKey: hasSecret(config.ai.geminiKey),
   webhookSecret: hasSecret(config.telegram.webhookSecret),
-  googleSheetId: hasSecret(config.sheets.spreadsheetId),
-  googleServiceAccount: hasSecret(config.sheets.serviceAccountFile),
 });

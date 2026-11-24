@@ -442,16 +442,6 @@ export function offlineResearch({ niche = '', location = '', sourceUrl = '', not
 
 export const LEAD_STAGES = ['New', 'Verified', 'Contacted', 'Replied', 'Won', 'Lost'];
 
-export const nextStage = (stage) => {
-  const index = LEAD_STAGES.indexOf(stage);
-  if (index === -1 || stage === 'Won' || stage === 'Lost') return stage;
-  return LEAD_STAGES[Math.min(index + 1, LEAD_STAGES.length - 3)];
-};
-
-/**
- * Deterministic 0-100 fit score. Deliberately explainable:
- * every point comes from something a human can see.
- */
 /**
  * Lead score = how badly this business needs the offer, not how complete the row is.
  *
@@ -482,11 +472,25 @@ export function scoreLead(lead = {}) {
   /* ── opportunity: what the auditor found ────────────────── */
   const audit = lead.audit || {};
   const severity = normaliseSeverity(audit.severity);
-  const opportunity = { high: 45, medium: 28, low: 8, none: 0 }[severity];
+  /*
+   * Credibility guard: if the auditor never reached the page, its findings say
+   * something about THIS machine's network, not about the business. Such an
+   * audit must not inflate the score — otherwise every lead ties at "high" and
+   * the ranking becomes noise. We keep the audit on the row as history and
+   * fall back to the signals we can actually see (website present or not).
+   */
+  const checkedForReal = audit.reachable === true || audit.checks?.fetched === true;
+  const opportunity = checkedForReal ? { high: 45, medium: 28, low: 8, none: 0 }[severity] : 0;
 
-  if (audit.severity) {
+  if (audit.severity && checkedForReal) {
     score += opportunity;
     reasons.push(`${severity}-severity gap · ${(audit.findings || []).length} finding(s)`);
+  } else if (audit.severity && !checkedForReal) {
+    reasons.push('audit could not reach the page — not counted');
+    if (!String(lead.website || '').trim()) {
+      score += 32;
+      reasons.push('no website at all — strongest pitch angle');
+    }
   } else if (!String(lead.website || '').trim()) {
     // No website at all is itself the strongest signal — nobody audited it because there is nothing to audit.
     score += 32;

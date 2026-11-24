@@ -325,6 +325,65 @@ async function main() {
   const index = await fetch(`${base}/`);
   const html = await index.text();
   html.includes('AI Invincible Office') && index.ok ? pass('Console page is served') : fail('Console page missing');
+
+  /* ── v2.3: live state, the team view, and honest agent accounting ── */
+
+  const team = stateAfter.team;
+  team?.rows?.length === 8 && team.summary
+    ? pass('Every agent reports what it is doing and holding', `${team.summary.activeToday}/${team.summary.total} active today`)
+    : fail('Team view payload missing');
+
+  const unused = (team?.rows || []).filter((row) => row.runs === 0);
+  unused.every((row) => row.okRate === null)
+    ? pass('An unused agent reports no success rate, not a fake 100%')
+    : fail('Unused agents are reporting a success rate');
+
+  // Open the live stream, trigger a write, and prove the push arrives.
+  const streamed = await readLiveStream(`${base}/api/stream`, async () => {
+    await command('/task Prove the live stream works');
+  });
+  streamed.sawHello && streamed.sawState
+    ? pass('Live stream pushes state after a write', `${streamed.events} events`)
+    : fail('Live stream did not push state', JSON.stringify(streamed));
+
+  html.includes('id="live-pill"') && html.includes('data-view="team"') && html.includes('id="btn-help"')
+    ? pass('Console ships the live pill, the team view and page help')
+    : fail('Console is missing the v2.3 affordances');
+}
+
+/**
+ * Read a few SSE frames while a write happens, then hang up.
+ * Resolves with what it saw so the caller can assert on it.
+ */
+async function readLiveStream(url, trigger) {
+  const controller = new AbortController();
+  const response = await fetch(url, { signal: controller.signal });
+  const seen = { sawHello: false, sawState: false, events: 0 };
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  const readLoop = (async () => {
+    try {
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        seen.events += 1;
+        const text = decoder.decode(value, { stream: true });
+        if (text.includes('event: hello')) seen.sawHello = true;
+        if (text.includes('event: state')) seen.sawState = true;
+        if (seen.sawState) break;
+      }
+    } catch {
+      /* aborted on purpose */
+    }
+  })();
+
+  await new Promise((resolve) => setTimeout(resolve, 150));
+  await trigger();
+  const timeout = new Promise((resolve) => setTimeout(resolve, 4000));
+  await Promise.race([readLoop, timeout]);
+  controller.abort();
+  return seen;
 }
 
 main()

@@ -138,8 +138,3 @@ export function startScheduler({ onTick } = {}) {
   return { started: true, hour: config.scheduler.hour, minute: config.scheduler.minute };
 }
 
-export function stopScheduler() {
-  if (timer) clearInterval(timer);
-  timer = null;
-  return { stopped: true };
-}

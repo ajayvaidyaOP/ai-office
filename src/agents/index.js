@@ -19,8 +19,8 @@ import {
 } from './offline.js';
 
 /** Record every agent invocation for the Agents + Reports pages. */
-const track = (agent, startedAt, provider, ok = true, ref = '', detail = '') =>
-  store.recordRun({ agent, ok, provider, ms: Date.now() - startedAt, ref, detail });
+const track = (agent, startedAt, provider, ok = true, ref = '', detail = '', fallback = false) =>
+  store.recordRun({ agent, ok, provider, ms: Date.now() - startedAt, ref, detail, fallback });
 
 const PRIORITIES = ['High', 'Medium', 'Low'];
 const OWNERS = ['You', 'Content Agent', 'Research Agent'];
@@ -97,7 +97,7 @@ export async function runManager(request, context = {}) {
       needsReview: validation.issues.length > 0,
     };
   } catch (error) {
-    track('manager', startedAt, 'offline', false, '', error.message);
+    track('manager', startedAt, 'offline', true, '', `offline fallback — ${error.message}`, true);
     return {
       ...offlineManager(request, { platform }),
       provider: 'offline',
@@ -137,7 +137,7 @@ export async function runContent({ request, platform, audience, tone, research, 
       provider: `${result.provider}/${result.model}`,
     };
   } catch (error) {
-    track('content', startedAt, 'offline', false, '', error.message);
+    track('content', startedAt, 'offline', true, '', `offline fallback — ${error.message}`, true);
     return {
       draft: offlineContent({ request, platform: resolvedPlatform, audience, tone: resolvedTone, research }),
       platform: resolvedPlatform,
@@ -174,7 +174,7 @@ export async function runQuality({ draft, platform, audience }) {
       provider: `${result.provider}/${result.model}`,
     };
   } catch (error) {
-    track('quality', startedAt, 'offline', false, '', error.message);
+    track('quality', startedAt, 'offline', true, '', `offline fallback — ${error.message}`, true);
     return {
       ...offlineQuality(draft, { platform }),
       checkedAt: new Date().toISOString(),
@@ -211,7 +211,7 @@ export async function runResearch({ niche, location, sourceUrl, notes = '' }) {
     return { ok: leads.length > 0, leads, provider: `${result.provider}/${result.model}` };
   } catch (error) {
     const leads = offlineResearch({ niche, location, sourceUrl, notes });
-    track('leadResearch', startedAt, 'offline', false, '', error.message);
+    track('leadResearch', startedAt, 'offline', true, '', `offline fallback — ${error.message}`, true);
     return { ok: leads.length > 0, leads, provider: 'offline', providerError: error.message };
   }
 }
@@ -311,7 +311,7 @@ export async function runBrief(context) {
     track('brief', startedAt, result.provider, true);
     return { text: result.text.trim(), provider: `${result.provider}/${result.model}` };
   } catch (error) {
-    track('brief', startedAt, 'offline', false, '', error.message);
+    track('brief', startedAt, 'offline', true, '', `offline fallback — ${error.message}`, true);
     return { text: offlineBrief(context), provider: 'offline', providerError: error.message };
   }
 }
@@ -335,7 +335,7 @@ export async function runFindPlan({ niche, location, notes = '' }) {
     track('finder', startedAt, result.provider, true, '', `${plan.queries.length} queries`);
     return { ...plan, provider: `${result.provider}/${result.model}` };
   } catch (error) {
-    track('finder', startedAt, 'offline', false, '', error.message);
+    track('finder', startedAt, 'offline', true, '', `offline fallback — ${error.message}`, true);
     return { ...fallback, provider: 'offline', providerError: error.message };
   }
 }
@@ -374,7 +374,7 @@ export async function runProposal({ company, contact, niche, value, notes, feedb
     track('proposal', startedAt, result.provider, true, '', company);
     return { text: result.text.trim(), provider: `${result.provider}/${result.model}` };
   } catch (error) {
-    track('proposal', startedAt, 'offline', false, '', error.message);
+    track('proposal', startedAt, 'offline', true, '', `offline fallback — ${error.message}`, true);
     return { text: offlineProposal({ company, contact, niche, value, notes }), provider: 'offline', providerError: error.message };
   }
 }

@@ -126,8 +126,17 @@ test('a broken site scores higher than a perfect one', () => {
     stage: 'New',
     phone: '+919876543210',
   };
-  const broken = scoreLead({ ...base, website: 'https://clinic.in', audit: { severity: 'high', findings: [{}] } });
-  const fine = scoreLead({ ...base, website: 'https://clinic.in', audit: { severity: 'none', findings: [] } });
+  // Both audits must be REAL (page actually read) for the comparison to be fair.
+  const broken = scoreLead({
+    ...base,
+    website: 'https://clinic.in',
+    audit: { severity: 'high', reachable: true, checks: { fetched: true }, findings: [{}] },
+  });
+  const fine = scoreLead({
+    ...base,
+    website: 'https://clinic.in',
+    audit: { severity: 'none', reachable: true, checks: { fetched: true }, findings: [] },
+  });
   const none = scoreLead({ ...base, website: '', audit: null });
   assert.ok(broken.score > fine.score, 'broken must beat fine');
   assert.ok(none.score > fine.score, 'no website at all must beat a working one');
@@ -190,4 +199,78 @@ test('id extraction ignores unrelated numbers', () => {
   assert.deepEqual(extractIds('L-0007', 'lead'), ['L-0007']);
   assert.deepEqual(extractIds('please check l-0012 and L-0012', 'lead'), ['L-0012']);
   assert.deepEqual(extractIds('no ids here', 'lead'), []);
+});
+
+/* ── credibility: an audit that never reached the page must not score ── */
+
+test('an unreachable audit does not inflate the score', () => {
+  const base = {
+    sourceUrl: 'https://example.com/listing',
+    phone: '+919876543210',
+    niche: 'dentist',
+    location: 'Pune',
+    fitReason: 'found on a public directory with a real phone number',
+    website: 'https://clinic.in',
+    stage: 'New',
+    reviewStatus: 'Needs human verification',
+  };
+  // What a network failure looks like: severity high, but the page never opened.
+  const unreachable = scoreLead({
+    ...base,
+    audit: { severity: 'high', reachable: false, checks: { fetched: false }, findings: [{}, {}] },
+  });
+  // The same lead with no audit at all should score the same, not lower.
+  const noAudit = scoreLead({ ...base, audit: null });
+
+  assert.equal(unreachable.score, noAudit.score, 'a failed fetch must not change the ranking');
+  assert.ok(
+    unreachable.reasons.some((r) => /could not reach the page/.test(r)),
+    'and the reason must say so out loud',
+  );
+});
+
+test('a real audit still moves the score', () => {
+  const base = {
+    sourceUrl: 'https://example.com/listing',
+    phone: '+919876543210',
+    niche: 'dentist',
+    location: 'Pune',
+    website: 'https://clinic.in',
+    stage: 'New',
+  };
+  const real = scoreLead({
+    ...base,
+    audit: { severity: 'high', reachable: true, checks: { fetched: true }, findings: [{}] },
+  });
+  const none = scoreLead({ ...base, audit: null });
+  assert.ok(real.score > none.score, 'a page we actually read should rank higher');
+});
+
+/* ── evidence harvester: verbatim quotes or nothing ───────── */
+
+const { harvestEvidence, evidenceLine } = await import('../src/agents/auditor.js');
+
+test('harvested evidence is verbatim from the page', async () => {
+  await withFixtureServer({ '/broken': fixture('broken.html') }, async (base) => {
+    const evidence = await harvestEvidence(`${base}/broken`);
+    assert.equal(evidence.ok, true);
+    assert.ok(evidence.quotes.length >= 4, `expected several quotes, got ${evidence.quotes.length}`);
+    const all = evidence.quotes.map((q) => q.quote).join(' ');
+    assert.match(all, /Lorem ipsum/i, 'must quote the real placeholder text');
+    assert.match(all, /\$25\.50|Signature cake/i, 'must quote the real dollar price');
+    assert.match(all, /tel:\+18003568933/i, 'must quote the real tel: href');
+    for (const quote of evidence.quotes) {
+      assert.ok(quote.label && quote.quote, 'every quote needs a label and text');
+    }
+  });
+});
+
+test('no evidence is invented when the page cannot be read', async () => {
+  await withFixtureServer({}, async (base) => {
+    const evidence = await harvestEvidence(`${base}/gone`);
+    assert.equal(evidence.ok, false);
+    assert.deepEqual(evidence.quotes, []);
+    assert.ok(evidence.reason, 'and it must say why');
+    assert.equal(evidenceLine(evidence), '', 'no one-liner without proof');
+  });
 });
