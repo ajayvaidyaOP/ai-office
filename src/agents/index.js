@@ -108,7 +108,7 @@ export async function runManager(request, context = {}) {
 }
 
 /** Content Creation Agent — Chapter 5. */
-export async function runContent({ request, platform, audience, tone, research }) {
+export async function runContent({ request, platform, audience, tone, research, feedback, previousDraft }) {
   const startedAt = Date.now();
   const resolvedPlatform = platform || detectPlatform(request);
   const resolvedTone = tone || detectTone(request);
@@ -120,8 +120,12 @@ export async function runContent({ request, platform, audience, tone, research }
         `Audience: ${audience || 'not specified — infer conservatively'}`,
         `Tone: ${resolvedTone}`,
         research ? `Task context from your office sheet (do not treat as verified facts):\n${research}` : 'Research notes: none supplied, so do not state statistics or prices.',
+        previousDraft ? `Previous version (rewrite it, do not append to it):\n${previousDraft}` : '',
+        feedback ? `${feedback} Rewrite the whole draft so the feedback is applied. Never paste the feedback into the output.` : '',
         'Write one draft only.',
-      ].join('\n'),
+      ]
+        .filter(Boolean)
+        .join('\n'),
       system: PROMPTS.content,
     });
     track('content', startedAt, result.provider, true, '', resolvedPlatform);
@@ -245,16 +249,33 @@ export async function runFollowup({ clientName, context, priorInteraction }) {
 }
 
 /** Outreach Drafting Agent — Chapter 8, under-90-words rule enforced in code too. */
-export async function runOutreach({ businessName, website, fitReason }) {
-  const values = { business_name: businessName || '', website: website || '', fit_reason: fitReason || '' };
+export async function runOutreach({ businessName, website, fitReason, findings = [], feedback = '', previousDraft = '' }) {
+  const findingText = Array.isArray(findings) && findings.length
+    ? findings.map((item) => `- ${typeof item === 'string' ? item : item.title}`).join('\n')
+    : '';
+  const values = {
+    business_name: businessName || '',
+    website: website || '',
+    fit_reason: fitReason || '',
+    audit_findings: findingText || 'No website audit yet — keep the claim general and do not invent a defect.',
+  };
   let text;
   let provider = 'offline';
   try {
-    const result = await ask({ prompt: 'Write the outreach message now.', system: fillPrompt(PROMPTS.outreach, values) });
+    const result = await ask({
+      prompt: [
+        'Write the outreach message now.',
+        previousDraft ? `\nPrevious version (rewrite it fully, do not append):\n${previousDraft}` : '',
+        feedback ? `\n${feedback}` : '',
+      ]
+        .filter(Boolean)
+        .join(''),
+      system: fillPrompt(PROMPTS.outreach, values),
+    });
     text = result.text.trim();
     provider = `${result.provider}/${result.model}`;
   } catch (error) {
-    text = offlineOutreach({ businessName, website, fitReason });
+    text = offlineOutreach({ businessName, website, fitReason, findings, feedback });
   }
   const words = text.split(/\s+/).filter(Boolean);
   return {
@@ -333,7 +354,7 @@ function normalisePlan(payload, fallback) {
 }
 
 /** Proposal Agent — drafts only, price stays human-controlled. */
-export async function runProposal({ company, contact, niche, value, notes }) {
+export async function runProposal({ company, contact, niche, value, notes, feedback, previousDraft }) {
   const startedAt = Date.now();
   try {
     const result = await ask({
@@ -343,7 +364,11 @@ export async function runProposal({ company, contact, niche, value, notes }) {
         `Niche: ${niche || 'not provided'}`,
         `Indicative value: ${Number(value) > 0 ? `INR ${value}` : 'not decided'}`,
         notes ? `Context notes: ${notes}` : 'No extra notes.',
-      ].join('\n'),
+        previousDraft ? `Previous version (rewrite it, do not append to it):\n${previousDraft}` : '',
+        feedback ? `${feedback} Rewrite the whole proposal so the feedback is applied. Never paste the feedback text into the output.` : '',
+      ]
+        .filter(Boolean)
+        .join('\n'),
       system: PROMPTS.proposal,
     });
     track('proposal', startedAt, result.provider, true, '', company);

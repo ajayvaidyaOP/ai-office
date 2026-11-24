@@ -13,6 +13,13 @@ human approval gates), extended into a full working product:
 - **Clients CRM** — kanban pipeline, deal values, follow-ups, proposals, notes.
 - **Client Finder** — niche + city → **real businesses from OpenStreetMap or Google Places**, scored
   for sales fit and imported as leads with their source links; plus a manual research playbook.
+- **Website Auditor** — opens a lead's public page and reports only what it can actually see
+  (no viewport, no booking path, lorem ipsum still live, dollar prices, a `tel:` link that dials
+  the wrong number, images hot-linked from another site) — every finding with screenshot-able evidence.
+- **Follow-up engine** — day 3 / day 7 cadence after you mark a message sent, with the exact text
+  and a "who is due" queue. Nothing is ever sent for you.
+- **Daily scheduler** — one tick a minute; at 09:00 Asia/Kolkata it builds the brief + follow-up
+  queue and tells **you** on Telegram. It can only address the owner's chat id, never a client.
 - **Work** — tasks with owners, priorities, deadlines, blocked reasons.
 - **Calendar** — deadlines, follow-ups and approvals in one agenda.
 - **Reports** — daily log, agent health, model usage.
@@ -23,7 +30,8 @@ Zero dependencies. Runs without any API key (offline rules engine), and upgrades
 
 ```bash
 npm start        # → http://localhost:3000
-npm run check    # end-to-end self-test
+npm run check    # end-to-end self-test (30 checks)
+npm test         # unit tests for the rules that must never break
 ```
 
 ---

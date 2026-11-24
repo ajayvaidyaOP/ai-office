@@ -24,6 +24,20 @@ export const isAllowedTelegramUser = (id) => {
   return allowed.map(String).includes(String(id));
 };
 
+/**
+ * Send a message to the OFFICE OWNER only.
+ *
+ * Used by the scheduler and by "you have 3 follow-ups due" reminders.
+ * It can never reach a client: the chat id comes from configuration, not
+ * from a lead record, and there is no API to override it.
+ */
+export async function notifyOwner(text, buttons = []) {
+  const chatId = config.telegram.ownerChatId || config.telegram.allowedUserIds?.[0] || '';
+  if (!config.telegram.botToken) return { ok: false, reason: 'no TELEGRAM_BOT_TOKEN configured' };
+  if (!chatId) return { ok: false, reason: 'no TELEGRAM_OWNER_CHAT_ID configured' };
+  return sendTelegram(chatId, text, buttons);
+}
+
 export async function sendTelegram(chatId, text, buttons = []) {
   if (!config.telegram.botToken) return { ok: false, reason: 'no token' };
   const reply_markup = buttons.length

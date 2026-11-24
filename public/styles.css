@@ -1504,3 +1504,91 @@ code {
   .source-foot .btn { width: 100%; justify-content: center; }
   .source-head { flex-direction: column; }
 }
+
+/* ═══════════════════════════════════════════════════════════════
+   LOCK SCREEN — shown only when OFFICE_ACCESS_CODE is set
+   ═══════════════════════════════════════════════════════════════ */
+.lock-screen {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: radial-gradient(120% 90% at 50% 0%, rgba(139, 92, 246, 0.16), transparent 60%), var(--bg);
+  backdrop-filter: blur(6px);
+}
+.lock-screen[hidden] { display: none; }
+
+.lock-card {
+  width: min(420px, 100%);
+  padding: 30px 28px 26px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-lg);
+  background: var(--surface-solid);
+  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.55);
+  display: grid;
+  gap: 14px;
+}
+.lock-mark {
+  width: 46px;
+  height: 46px;
+  display: grid;
+  place-items: center;
+  border-radius: 14px;
+  background: var(--violet-soft);
+  color: var(--violet);
+}
+.lock-mark .ic { width: 22px; height: 22px; }
+.lock-card h2 { margin: 0; font-size: 20px; letter-spacing: -0.01em; }
+.lock-card p { margin: 0; line-height: 1.55; }
+.lock-card code {
+  font-size: 11px;
+  padding: 1px 5px;
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.06);
+}
+.lock-field { display: grid; gap: 6px; }
+.lock-field span { font-size: 12px; color: var(--text-3); letter-spacing: 0.02em; }
+.lock-field input {
+  width: 100%;
+  padding: 11px 13px;
+  border-radius: 11px;
+  border: 1px solid var(--line-2);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text);
+  font-size: 15px;
+  letter-spacing: 0.18em;
+}
+.lock-field input:focus { outline: none; border-color: var(--violet); box-shadow: 0 0 0 3px var(--violet-soft); }
+.lock-error { min-height: 16px; color: var(--rose); font-size: 12.5px; }
+.lock-actions { display: flex; gap: 10px; }
+
+/* audit + follow-up bits inside existing cards */
+.audit-findings { display: grid; gap: 8px; margin-top: 10px; }
+.audit-finding {
+  display: grid;
+  gap: 2px;
+  padding: 9px 11px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.02);
+  font-size: 12.5px;
+}
+.audit-finding b { font-weight: 600; }
+.audit-finding .evidence { color: var(--text-3); font-size: 11.5px; }
+.audit-finding.is-high { border-color: rgba(251, 113, 133, 0.35); background: rgba(251, 113, 133, 0.06); }
+.audit-finding.is-medium { border-color: rgba(251, 191, 36, 0.3); background: rgba(251, 191, 36, 0.05); }
+.audit-finding.is-low { border-color: rgba(34, 211, 238, 0.25); background: rgba(34, 211, 238, 0.04); }
+
+.followup-item {
+  display: grid;
+  gap: 6px;
+  padding: 12px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.02);
+}
+.followup-item header { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+.followup-item p { margin: 0; font-size: 13px; color: var(--text-2); line-height: 1.5; }
+.followup-item .row-actions { display: flex; gap: 8px; flex-wrap: wrap; }

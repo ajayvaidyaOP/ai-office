@@ -3,7 +3,7 @@
   "version": "2.0.0",
   "private": true,
   "type": "module",
-  "description": "AI Invincible Office — your autonomous back office: AI manager, client finder, content studio, approvals, reports.",
+  "description": "AI Invincible Office \u2014 your autonomous back office: AI manager, client finder, content studio, approvals, reports.",
   "engines": {
     "node": ">=20"
   },
@@ -11,7 +11,9 @@
     "start": "node server.js",
     "dev": "node --watch server.js",
     "check": "node scripts/check.mjs",
-    "backup": "node scripts/backup.mjs"
+    "backup": "node scripts/backup.mjs",
+    "test": "node --test \"test/*.test.mjs\"",
+    "test:watch": "node --test --watch \"test/*.test.mjs\""
   },
   "keywords": [
     "ai",
