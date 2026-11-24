@@ -127,3 +127,14 @@ Guard added, and proven to catch it:
 npm test      31/31
 npm run check 39/39
 ```
+
+## One more, found at the end
+
+`npm run backup` runs in its own process and stamps `meta.lastBackupAt` in its own
+copy of `data/db.json`. The long-running server never re-read that file, so after a
+**successful** backup the Setup checklist still said *"No backup yet"* and invited you
+to run one you had just run.
+
+`store.reloadMeta()` now refreshes that single field from disk on each `/api/state`
+call. Verified: `lastBackupAt now: 2026-11-24T17:37:25.308Z` immediately after a
+backup, with no server restart.
