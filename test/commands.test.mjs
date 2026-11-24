@@ -148,3 +148,143 @@ test('promoting a lead does not invent a won deal', async () => {
   store.db.leads = store.db.leads.filter((row) => row.id !== created.id);
   store.save();
 });
+
+/* ── deal -> delivery: the four hand-offs a real office needs ── */
+
+test('promoting keeps the send history and stops calling it Won or Lost', async () => {
+  const { promoteLead, addLeads, markLeadSent, verifyLead } = await import('../src/office.js');
+  const { store } = await import('../src/store.js');
+
+  const created = (await addLeads({ niche: 'bakery', location: 'Pune', sourceUrl: 'https://cakecstacy.com', notes: 'Cakecstacy — no order page' })).leads[0];
+  verifyLead(created.id);
+  const sentAt = markLeadSent({ id: created.id, channel: 'Instagram DM' }).lead.sentAt;
+
+  const { lead, client } = promoteLead(created.id, 'tester');
+
+  assert.equal(lead.stage, 'Client', 'a handed-over lead is a client, not a lost or won deal');
+  assert.equal(client.sentAt, sentAt, 'the fact that you already messaged them must survive promotion');
+  assert.ok(!client.proposalSentAt, 'promotion must not claim a proposal was sent');
+
+  store.db.clients = store.db.clients.filter((row) => row.id !== client.id);
+  store.db.leads = store.db.leads.filter((row) => row.id !== created.id);
+  store.save();
+});
+
+test('approving a proposal moves the pipeline but does not fake the send', async () => {
+  const { decideDraft, createProposal, addClient } = await import('../src/office.js');
+  const { store } = await import('../src/store.js');
+
+  const { client } = addClient({ company: 'Zenith Bakery', niche: 'bakery', stage: 'Lead' }, 'tester');
+  const { draft } = await createProposal(client.id, 'tester');
+  await decideDraft({ id: draft.id, decision: 'approve', feedback: 'looks good' }, 'tester');
+
+  const after = store.db.clients.find((row) => row.id === client.id);
+  assert.equal(after.stage, 'Proposal sent', 'the board must show that a proposal exists');
+  assert.ok(!after.proposalSentAt, 'approving is not sending — the human still sends by hand');
+
+  store.db.clients = store.db.clients.filter((row) => row.id !== client.id);
+  store.db.drafts = store.db.drafts.filter((row) => row.id !== draft.id);
+  store.save();
+});
+
+test('/sent C-0001 starts the proposal chase that used to never exist', async () => {
+  const { markProposalSent, addClient, followUpQueue } = await import('../src/office.js');
+  const { store } = await import('../src/store.js');
+
+  const { client } = addClient({ company: 'Kirti Interiors', niche: 'interior', stage: 'Proposal sent' }, 'tester');
+  markProposalSent({ id: client.id, channel: 'Email' }, 'tester');
+
+  const after = store.db.clients.find((row) => row.id === client.id);
+  assert.ok(after.proposalSentAt, 'proposalSentAt was read by the queue but never written before this');
+
+  after.proposalSentAt = new Date(Date.now() - 4 * 864e5).toISOString();
+  const due = followUpQueue().filter((row) => row.kind === 'client' && row.id === client.id);
+  assert.equal(due.length, 1, 'an ignored proposal must become due a follow-up');
+  assert.equal(due[0].step, 3);
+
+  store.db.clients = store.db.clients.filter((row) => row.id !== client.id);
+  store.save();
+});
+
+test('work can be billed to a client', async () => {
+  const { createTasks, addClient } = await import('../src/office.js');
+  const { store } = await import('../src/store.js');
+
+  const { client } = addClient({ company: 'Cakecstacy', niche: 'bakery' }, 'tester');
+  const { tasks } = await createTasks('Write three Reels for the weekend menu', 'tester', client.id);
+
+  assert.ok(tasks.length > 0);
+  assert.equal(tasks[0].clientId, client.id, 'a task with no client cannot be billed or costed');
+  assert.equal(tasks[0].client, 'Cakecstacy');
+
+  store.db.tasks = store.db.tasks.filter((row) => !tasks.some((task) => task.id === row.id));
+  store.db.clients = store.db.clients.filter((row) => row.id !== client.id);
+  store.save();
+});
+
+test('a task cannot be billed to a client that does not exist', async () => {
+  const { createTasks } = await import('../src/office.js');
+  await assert.rejects(async () => createTasks('Something small', 'tester', 'C-9999'), /C-9999 not found/);
+});
+
+/* ── money: the retainer half of the office ─────────────────── */
+
+test('a retainer is due to invoice on day one, not a month later', async () => {
+  const { setRetainer, addClient, markInvoiceSent } = await import('../src/office.js');
+  const { store } = await import('../src/store.js');
+
+  const { client } = addClient({ company: 'Skyline Realty', niche: 'realty' }, 'tester');
+  setRetainer(client.id, { amount: 15000, cycle: 'monthly' }, 'tester');
+
+  /* these actions return the live row, so read a copy or every assert sees the future */
+  const onRetainer = { ...store.db.clients.find((row) => row.id === client.id) };
+
+  assert.equal(onRetainer.stage, 'Won', 'signing a retainer is a won deal');
+  assert.equal(onRetainer.recurringAmount, 15000);
+  assert.equal(onRetainer.nextInvoiceAt, onRetainer.retainerStartAt, 'the first invoice is due the day the retainer starts');
+
+  markInvoiceSent(client.id, 'tester');
+  const after = { ...store.db.clients.find((row) => row.id === client.id) };
+  assert.equal(after.invoices.length, 1);
+  assert.notEqual(after.nextInvoiceAt, onRetainer.nextInvoiceAt, 'logging an invoice must move the date forward');
+  assert.equal(after.proposalSentAt ?? null, null, 'a retainer must not touch the proposal clock');
+
+  store.db.clients = store.db.clients.filter((row) => row.id !== client.id);
+  store.save();
+});
+
+test('month-end retainers do not drift into the wrong month', async () => {
+  const { setRetainer, addClient } = await import('../src/office.js');
+  const { store } = await import('../src/store.js');
+
+  const { client } = addClient({ company: 'Month End Ltd' }, 'tester');
+  const { client: onRetainer } = setRetainer(client.id, { amount: 5000, cycle: 'monthly', startDate: '2026-01-31' }, 'tester');
+  assert.equal(onRetainer.nextInvoiceAt, '2026-01-31');
+
+  store.db.clients = store.db.clients.filter((row) => row.id !== client.id);
+  store.save();
+});
+
+test('a client without a retainer cannot be invoiced', async () => {
+  const { markInvoiceSent, addClient } = await import('../src/office.js');
+  const { store } = await import('../src/store.js');
+
+  const { client } = addClient({ company: 'No Retainer Co' }, 'tester');
+  // assert.rejects does not catch a synchronous throw, so wrap it
+  await assert.rejects(async () => markInvoiceSent(client.id), /not on a retainer/);
+
+  store.db.clients = store.db.clients.filter((row) => row.id !== client.id);
+  store.save();
+});
+
+test('a bad retainer cycle or amount is refused', async () => {
+  const { setRetainer, addClient } = await import('../src/office.js');
+  const { store } = await import('../src/store.js');
+
+  const { client } = addClient({ company: 'Bad Input Co' }, 'tester');
+  await assert.rejects(async () => setRetainer(client.id, { amount: 1000, cycle: 'weekly' }), /Cycle must be one of/);
+  await assert.rejects(async () => setRetainer(client.id, { amount: 0, cycle: 'monthly' }), /needs a monthly amount/);
+
+  store.db.clients = store.db.clients.filter((row) => row.id !== client.id);
+  store.save();
+});

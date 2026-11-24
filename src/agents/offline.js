@@ -16,6 +16,7 @@ const isPriority = (value) => PRIORITY_ORDER.includes(value);
 const TASK_ID = /\bT-\d{4}\b/gi;
 const DRAFT_ID = /\bD-\d{4}\b/gi;
 const LEAD_ID = /\bL-\d{4}\b/gi;
+const CLIENT_ID = /\bC-\d{4}\b/gi;
 
 export function detectPlatform(text = '') {
   const value = text.toLowerCase();
@@ -449,7 +450,12 @@ export function offlineResearch({ niche = '', location = '', sourceUrl = '', not
 
 /* ── Client pipeline helpers (Chapter 8, extended) ───────────── */
 
-export const LEAD_STAGES = ['New', 'Verified', 'Contacted', 'Replied', 'Won', 'Lost'];
+/*
+ * 'Client' is not a dead end — it means the lead became a client record and the
+ * deal moved to the pipeline. Without it, promoting had to lie ('Won' inflated
+ * the win rate, 'Lost' counted a happy customer as a loss).
+ */
+export const LEAD_STAGES = ['New', 'Verified', 'Contacted', 'Replied', 'Won', 'Lost', 'Client'];
 
 /**
  * Lead score = how badly this business needs the offer, not how complete the row is.
@@ -629,7 +635,7 @@ export function offlineProposal({ company = '', contact = '', niche = '', value 
 
 /** Pull IDs out of any text (used by /approve, /revise, /reject). */
 export function extractIds(text = '', kind = 'task') {
-  const regex = kind === 'draft' ? DRAFT_ID : kind === 'lead' ? LEAD_ID : TASK_ID;
+  const regex = kind === 'draft' ? DRAFT_ID : kind === 'lead' ? LEAD_ID : kind === 'client' ? CLIENT_ID : TASK_ID;
   return [...new Set((String(text).match(regex) || []).map((id) => id.toUpperCase()))];
 }
 

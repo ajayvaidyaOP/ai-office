@@ -956,6 +956,7 @@ code {
 .client-card .cc-meta { display: flex; justify-content: space-between; gap: 6px; margin-top: 5px; font-size: 10.5px; color: var(--text-3); }
 .client-card .cc-value { margin-top: 6px; font-size: 13px; font-weight: 650; letter-spacing: -0.02em; color: #d9f99d; }
 .client-card .cc-next { margin-top: 4px; font-size: 10px; color: var(--amber); }
+.client-card .cc-recur { margin-left: 4px; font-size: 10px; font-weight: 500; color: var(--muted, #94a3b8); }
 
 /* ── finder ─────────────────────────────────────────────────── */
 

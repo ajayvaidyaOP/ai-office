@@ -71,10 +71,17 @@ Dark obsidian glass, violet→cyan accents, ⌘K command palette, client drawer,
 | `/source cafés in Pune` | **live search** — real businesses with real source URLs |
 | `/lead niche \| city \| source URL \| notes` | lead rows with source URLs + fit score |
 | `/verify L-0001` | mark a lead checked by a human |
-| `/promote L-0001` | turn a lead into a client record |
+| `/promote L-0001` | turn a lead into a client record (keeps the send history) |
+| `/sent L-0001` | mark the first DM as sent by hand — starts the day-3 clock |
 | `/stage C-0002 Negotiation` | move a client (or lead) pipeline stage |
 | `/outreach L-0001` | gated outreach draft, never sent |
 | `/proposal C-0002` | gated proposal draft with price placeholders |
+| `/sent C-0002` | mark the proposal as sent by hand — starts the client chase |
+| `/followups` · `/followup-sent L-0001 3` | who is due, with the exact text |
+| `/task for C-0002 …` | plan work and bill it to a client |
+| `/retainer C-0002 15000 monthly` | put a client on a retainer (deal Won, invoice due today) |
+| `/invoice C-0002` | log an invoice and roll the date forward |
+| `/money` | retainer total, invoiced this month, what is due |
 | `/clients` | pipeline summary |
 | `/done` · `/progress` · `/block T-0001` | task status |
 | `/status`, `/help` | counters, command list |
@@ -129,7 +136,7 @@ src/
   channels/telegram.js   polling + webhook connector, allow-list
   scheduler.js           daily brief + follow-up queue (replaces n8n)
 public/                  the console: HTML, CSS design system, ES-module app
-docs/                    guide + v2.1/v2.2/v2.3/v2.3.2 changelogs + your Pune pitch pack
+docs/                    guide + v2.1–v2.4 changelogs + your Pune pitch pack
 test/                    node --test unit tests with local fixtures
 scripts/check.mjs        end-to-end self-check (30 checks)
 scripts/backup.mjs       DB + CSV backup with sha256 + freshness report

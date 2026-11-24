@@ -301,7 +301,7 @@ async function route(req, res, url) {
 
   /* ── Tasks ───────────────────────────────────────────────── */
   if (pathname === '/api/tasks' && method === 'POST') {
-    return action(async (body) => office.createTasks(body.request, body.actor || 'owner'))(req, res, await readBody(req));
+    return action(async (body) => office.createTasks(body.request, body.actor || 'owner', body.clientId || ''))(req, res, await readBody(req));
   }
   const taskMatch = pathname.match(/^\/api\/tasks\/(T-\d{4})(?:\/(status))?$/i);
   if (taskMatch) {
