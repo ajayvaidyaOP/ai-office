@@ -423,14 +423,23 @@ export function offlineResearch({ niche = '', location = '', sourceUrl = '', not
   if (lines.length === 0) return [];
 
   return lines.slice(0, 5).map((line) => {
-    const [namePart, ...rest] = line.split(/\s+[—-]\s+/);
+    // "Cakecstacy — daily specials, no order page" → name + observation.
+    // A line with no separator is the name itself, not an observation.
+    const [namePart, ...rest] = line.split(/\s+[—–-]\s+/);
     const businessName = (namePart || line).replace(/\|/g, '').trim().slice(0, 120);
+    const observation = rest.join(' — ').trim();
     return {
       businessName,
       website: '',
       niche: niche || 'unspecified',
       sourceUrl,
-      fitReason: rest.join(' — ').trim() || `Listed on ${sourceUrl}${location ? ` (${location})` : ''}`,
+      /*
+       * The fit reason must be a sentence a human could say out loud. A bare URL
+       * is not a reason, and it makes every row look identical in the list.
+       */
+      fitReason: observation
+        ? observation.slice(0, 220)
+        : `Saw this on ${sourceUrl.replace(/^https?:\/\/(www\.)?/, '')}${location ? ` — ${location}` : ''}; no content plan seen yet`,
       reviewStatus: 'Needs human verification',
       contactStatus: 'Not contacted',
     };

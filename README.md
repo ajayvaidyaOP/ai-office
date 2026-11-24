@@ -129,7 +129,7 @@ src/
   channels/telegram.js   polling + webhook connector, allow-list
   scheduler.js           daily brief + follow-up queue (replaces n8n)
 public/                  the console: HTML, CSS design system, ES-module app
-docs/                    guide + v2.1/v2.2/v2.3 changelogs + your Pune pitch pack
+docs/                    guide + v2.1/v2.2/v2.3/v2.3.2 changelogs + your Pune pitch pack
 test/                    node --test unit tests with local fixtures
 scripts/check.mjs        end-to-end self-check (30 checks)
 scripts/backup.mjs       DB + CSV backup with sha256 + freshness report

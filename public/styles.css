@@ -1730,16 +1730,16 @@ code {
 .team-table { display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: 14px; overflow: hidden; background: rgba(255,255,255,0.012); }
 .team-row { border-bottom: 1px solid var(--line); }
 .team-row:last-child { border-bottom: 0; }
-.team-row > summary {
+.team-row details > summary {
   display: grid;
   grid-template-columns: 8px minmax(150px, 1.1fr) minmax(0, 2fr) 34px 52px 16px;
   align-items: center; gap: 12px;
   padding: 11px 14px; cursor: pointer; list-style: none;
   border-left: 2px solid var(--accent);
 }
-.team-row > summary::-webkit-details-marker { display: none; }
-.team-row > summary:hover { background: rgba(255,255,255,0.03); }
-.team-row[open] > summary { background: rgba(255,255,255,0.035); }
+.team-row summary::-webkit-details-marker { display: none; }
+.team-row summary:hover { background: rgba(255,255,255,0.03); }
+.team-row details[open] > summary { background: rgba(255,255,255,0.035); }
 .tr-dot { width: 8px; height: 8px; border-radius: 50%; }
 .tr-name { min-width: 0; }
 .tr-name b { display: block; font-size: 12px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -1749,11 +1749,11 @@ code {
 .tr-hold .ic { width: 12px; height: 12px; }
 .tr-rate { font-size: 11px; color: var(--text-3); text-align: right; }
 .tr-chev { width: 14px; height: 14px; color: var(--text-3); transition: transform 0.18s; }
-.team-row[open] .tr-chev { transform: rotate(180deg); }
+.team-row details[open] .tr-chev { transform: rotate(180deg); }
 .tr-body { padding: 0 14px 14px 34px; display: flex; flex-direction: column; gap: 9px; }
 
 @media (max-width: 860px) {
-  .team-row > summary { grid-template-columns: 8px minmax(0,1fr) 34px 16px; }
+  .team-row details > summary { grid-template-columns: 8px minmax(0,1fr) 34px 16px; }
   .tr-doing, .tr-rate { display: none; }
   .tr-body { padding-left: 14px; }
 }
