@@ -184,6 +184,7 @@
                   <div class="chart" id="activity-chart"></div>
                   <div class="chart-legend"><span class="dot dot-a"></span>agent runs <span class="dot dot-b"></span>drafts</div>
                 </div>
+                </div>
               </div>
             </details>
           </section>
@@ -518,11 +519,10 @@
                   <ul class="check-list" id="telegram-list"></ul>
                 </div>
               </div>
-            </details>
 
-              <!-- exports + the destroy button, inside the fold -->
-              <div class="grid-2" style="margin-top:0">
-              <div class="card panel">
+              <!-- exports + the destroy button, inside the same fold -->
+              <div class="grid-2" style="margin:0;padding:0 16px 16px">
+                <div class="card panel">
                 <header class="panel-head"><div><h3>Export as CSV</h3><p>One file per tab. Opens in Excel or Sheets.</p></div></header>
                 <div class="export-grid">
                   <a class="export-link" href="/api/export/tasks" download><b>Tasks</b><span>csv</span></a>
@@ -555,7 +555,7 @@
           </section>
         </main>
       </div>
-    </div>
+    <!-- .app ends here; the palette, modal, drawer and lock screen are siblings -->
 
     <!-- ────────── Command palette ────────── -->
     <div class="palette-backdrop" id="palette" hidden>
